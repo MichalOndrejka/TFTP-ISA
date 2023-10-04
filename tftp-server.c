@@ -36,4 +36,6 @@ int main(int argc, char **argv) {
             break;
         }
     }
+
+    printf("port: %d, root_dirpath = %s", port, root_dirpath);
 }
