@@ -15,5 +15,5 @@ $(EXECUTABLE2): $(OBJS2)
 	$(CC) $^ -o $@ $(CFLAGS)
 
 clean:
-	rm $(EXECUTABLE1)
-	rm $(EXECUTABLE2)
+	rm bin/$(EXECUTABLE1)
+	rm bin/$(EXECUTABLE2)
