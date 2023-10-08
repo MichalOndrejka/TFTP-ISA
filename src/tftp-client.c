@@ -7,6 +7,28 @@
 #include <getopt.h>
 #include <stdbool.h>
 
+#define MAX_BUFFER_SIZE 516  // Max size of TFTP message (512 data byes + 4 headers)
+
+
+void downloadFile(int client_socket) {
+    char data_buffer[MAX_BUFFER_SIZE];
+    memset(data_buffer, 0, MAX_BUFFER_SIZE);
+
+    ssize_t recv_len = recvfrom(client_socket, data_buffer, MAX_BUFFER_SIZE, 0, NULL, NULL);
+    if (recv_len < 0) {
+        perror("Error while receiving data");
+        close(client_socket);
+        exit(1);
+    }
+
+    // HANDLE RECEIVED DATA AND SAVE TO A FILE
+    // SEND ACK
+}
+
+void uploadFile(int client_socket) {
+    return;
+}
+
 void printUsage(char **argv) {
     fprintf(stderr, "Usage: %s -h <hostname> [-p port] [-f filepath] -t <dest_filepath>\n", argv[0]);
     exit(EXIT_FAILURE);
@@ -23,6 +45,9 @@ int main(int argc, char **argv) {
     int port = 69;
     char *file = NULL;
     char *dest_file = NULL;
+
+    bool download = false;
+    bool upload = false;
 
     //Get values of arguments
     while ((option = getopt(argc, argv, "h:p:f:t:")) != -1) {
@@ -48,13 +73,15 @@ int main(int argc, char **argv) {
     if (host == NULL) printUsage(argv);
     if (dest_file == NULL) printUsage(argv);
 
+    if (file == NULL) upload = true;
+    else download = true;
+
     printf("host = %s, port = %d, file = %s, dest_file = %s\n", host, port, file, dest_file);
 
-    int type = SOCK_DGRAM;
-
-    //CREATE SOCKET
-    int family = AF_INET;
+    //CREATE UDP SOCKET
     int client_socket = -1;
+    int family = AF_INET;
+    int type = SOCK_DGRAM;
 
     client_socket = socket(family, type, 0);
     if (client_socket <= 0) {
@@ -78,4 +105,6 @@ int main(int argc, char **argv) {
 
     struct sockaddr *address = (struct sockaddr *) &server_address;
     socklen_t address_size = sizeof(server_address);
+
+    if (download) downloadFile(client_socket);
 }
