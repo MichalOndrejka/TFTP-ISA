@@ -6,12 +6,30 @@
 #include <netdb.h>
 #include <getopt.h>
 #include <stdbool.h>
+#include <errno.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <sys/wait.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <stdarg.h>
+#include <assert.h>
+#include <fcntl.h>
 
 typedef struct {
     unsigned short block_num;
     char data[512];
     int data_len;
 } TFTPDataBlock;
+
+void *get_in_addr(struct sockaddr *sa)
+{
+    if (sa->sa_family == AF_INET) {
+        return &(((struct sockaddr_in*)sa)->sin_addr);
+    }
+
+    return &(((struct sockaddr_in6*)sa)->sin6_addr);
+}
 
 void printUsage(char **argv) {
     fprintf(stderr, "Usage: %s [-p port] root_dirpath\n", argv[0]);
@@ -64,9 +82,29 @@ int main(int argc, char **argv) {
     server_address.sin_addr.s_addr = INADDR_ANY;
 
     if (bind(server_socket, (struct sockaddr *)&server_address, sizeof(server_address)) < 0) {
-        perror("Error assigning address and port");
+        fprintf(stderr, "ERROR: bind error\n");
         close(server_socket);
-        exit(1);
+        exit(EXIT_FAILURE);
+    }
+
+    if ((listen(server_socket, 10)) < 0) {
+        fprintf(stderr, "ERROR: listen error\n");
+        close(server_socket);
+        exit(EXIT_FAILURE);
+    }
+
+    while(true) {
+        struct sockaddr_storage client_addr;
+        socklen_t  sin_size = sizeof client_addr;
+        int new_fd = accept(server_socket, (struct sockaddr *)&client_addr, &sin_size);
+        if (new_fd == -1) {
+            perror("accept");
+            continue;
+        }
+
+        char s[INET6_ADDRSTRLEN];
+        inet_ntop(client_addr.ss_family, get_in_addr((struct sockaddr *)&client_addr), s, sizeof s);
+        printf("server: got connection from %s\n", s);
     }
 
     socklen_t client_len = sizeof(server_address);
