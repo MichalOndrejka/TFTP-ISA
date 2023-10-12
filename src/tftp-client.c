@@ -97,6 +97,7 @@ int main(int argc, char **argv) {
         // Send the RRQ (Read Request) packet
         if (sendto(sockfd, rrq_packet, rrq_packet_len, 0, address, sizeof(address)) == -1)
             printError("ERROR: RRQ sendto");
+        
         char buffer[MAX_BUFFER_SIZE];
         int bytes_rx;
         int bytes_tx;
@@ -105,6 +106,7 @@ int main(int argc, char **argv) {
         int expected_block = 1;
         char ack_buffer[4];
         char data[MAX_BUFFER_SIZE - 4];
+
         do {
             // RECEIVE DATA
             bzero(buffer, MAX_BUFFER_SIZE);
@@ -150,8 +152,53 @@ int main(int argc, char **argv) {
         if (sendto(sockfd, wrq_packet, wrq_packet_len, 0, address, sizeof(address)) == -1)
             printError("ERROR: WRQ sendto");
         
-        // Receive ACK0 with new port from server, use this port for uploading DATA BLOCKS, receive ACK for each one
-    }
+        // RECEIVE DATA
+        char buffer[MAX_BUFFER_SIZE];
+        char ack_buffer[4];
+        int bytes_rx;
+        int bytes_tx;
+        char block[2];
+        char opcode[2];
+        int expected_block = 0;
 
+        bzero(ack_buffer, 4);
+        bytes_rx = recvfrom(sockfd, ack_buffer, 4, 0, address, &server_len);
+        if (bytes_rx < 0) {
+            printError("recvfrom not succesful");
+        }
+
+        strncpy(opcode, &ack_buffer[0], 2);
+        strncpy(block, &ack_buffer[2], 2);
+    
+        if (atoi(opcode) != ACK_OPCODE) printError("ERROR: unexpected opcode");
+        if (atoi(block) != expected_block) printError("ERROR: unexpected block");
+        // Receive ACK0 with new port from server, use this port for uploading DATA BLOCKS, receive ACK for each one
+
+        do {
+            // CONSTRUCT BUFFER
+            bzero(buffer, MAX_BUFFER_SIZE);
+
+
+            // SEND DATA PACKET
+            bytes_tx = sendto(sockfd, buffer, MAX_BUFFER_SIZE, 0, address, server_len);
+            if (bytes_tx < 0) {
+                printError("sendto not succesful");
+            }
+
+            // RECEIVE ACK PACKET
+            bytes_rx = recvfrom(sockfd, ack_buffer, 4, 0, address, &server_len);
+            if (bytes_rx < 0) {
+                printError("recvfrom not succesful");
+            }
+
+            // CHECK ACK PACKET
+            strncpy(opcode, &ack_buffer[0], 2);
+            strncpy(block, &ack_buffer[2], 2);
+
+            if (atoi(opcode) != ACK_OPCODE) printError("ERROR: unexpected opcode");
+            if (atoi(block) != expected_block) printError("ERROR: unexpected block");            
+            expected_block++;
+        } while(bytes_tx >= MAX_BUFFER_SIZE);
+    }
     return 0;
 }
