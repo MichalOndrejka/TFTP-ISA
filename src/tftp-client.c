@@ -92,13 +92,13 @@ int main(int argc, char **argv) {
     socklen_t server_len = sizeof(server_addr);
 
     char buffer[BUFFER_SIZE];
-    char block[BLOCK_NUMBER_SIZE];
-    char opcode[OPCODE_SIZE];
+    int16_t block;
+    int16_t opcode;
     char data[BUFFER_SIZE - 4];
     char ack_buffer[ACK_PACKET_SIZE];
     int bytes_rx;
     int bytes_tx;
-    int expected_block;
+    int16_t expected_block;
 
     if (file) {
         expected_block = 1;
@@ -116,6 +116,19 @@ int main(int argc, char **argv) {
         bytes_tx = sendto(sockfd, rrq_packet, rrq_packet_len, 0, address, server_len);
         if (bytes_tx < 0) printError("RRQ sendto");
 
+        // DECALRE FILE FOR APPENDING THE DATA
+        FILE *receivedFile = fopen(dest_file, "w");
+        if (receivedFile == NULL) printError("creating file");
+        fclose(receivedFile);
+
+        // APPEND ASCII OR BIN TO FILE
+        if (strcmp(mode, "netascii")) {
+            receivedFile = fopen(dest_file,"a");
+        } else if (strcmp(mode, "octet")) {
+            receivedFile = fopen(dest_file, "ab");
+        }
+        if (receivedFile == NULL) printError("opening file for append");
+
         do {
             // RECEIVE DATA
             bzero(buffer, BUFFER_SIZE);
@@ -123,22 +136,23 @@ int main(int argc, char **argv) {
             if (bytes_rx < 0) printError("recvfrom not succesful");
 
             // GET OPCODE AND BLOCK NUMBERS
-            strncpy(opcode, &buffer[0], 2);
-            strncpy(block, &buffer[2], 2);
+            memcpy(&opcode, &buffer[0], 2);
+            memcpy(&block, &buffer[2], 2);
 
             // CHECK OPCODE AND BLOCK NUMBER
-            if (atoi(opcode) != DATA_OPCODE) printError("unexpected opcode");
-            if (atoi(block) != expected_block) printError("unexpected block");
+            if (opcode != DATA_OPCODE) printError("unexpected opcode");
+            if (block != expected_block) printError("unexpected block");
 
             // GET DATA
-            strncpy(data, &buffer[4], bytes_rx - 4);
+            memcpy(data, &buffer[4], bytes_rx - 4);
 
             // HANDLE DATA
+            if (fprintf(receivedFile, "%s", buffer) < 0) printError("appending to file");
 
             // CREATE ACK PACKET
             bzero(ack_buffer, 4);
-            strncpy(&ack_buffer[0], opcode, 2);
-            strncpy(&ack_buffer[2], block, 2);
+            memcpy(&ack_buffer[0], &opcode, 2);
+            memcpy(&ack_buffer[2], &block, 2);
 
             // SEND ACK PACKET
             bytes_tx = sendto(sockfd, ack_buffer, 4, 0, address, server_len);
@@ -146,7 +160,10 @@ int main(int argc, char **argv) {
             
             expected_block++;
         } while(bytes_rx >= BUFFER_SIZE);
-        // Receive DATA BLOCK and send ACK for each one, if size is less then 512 it is the last DATA BLOCK
+
+        // CLOSE FILE
+        fclose(receivedFile);
+
     } else {
         expected_block = 0;
 
@@ -168,18 +185,37 @@ int main(int argc, char **argv) {
         bytes_rx = recvfrom(sockfd, buffer, BUFFER_SIZE, 0, address, &server_len);
         if (bytes_rx < 0) printError("recvfrom not succesful");
 
-        strncpy(opcode, &buffer[0], 2);
-        strncpy(block, &buffer[2], 2);
+        memcpy(&opcode, &buffer[0], 2);
+        memcpy(&block, &buffer[2], 2);
     
-        if (atoi(opcode) != DATA_OPCODE) printError("unexpected opcode");
-        if (atoi(block) != expected_block) printError("unexpected block");
+        if (opcode != DATA_OPCODE) printError("unexpected opcode");
+        if (block != expected_block) printError("unexpected block");
 
         int new_port = atoi(&buffer[4]);
-        // Receive ACK0 with new port from server, use this port for uploading DATA BLOCKS, receive ACK for each one
+        server_addr.sin_port = htons(new_port);
 
+        // DECALRE FILE FOR READING THE DATA
+        FILE *sendingFile;
+
+        // READ ASCII OR BIN FROM FILE
+        if (strcmp(mode, "netascii")) {
+            sendingFile = fopen(file,"r");
+        } else if (strcmp(mode, "octet")) {
+            sendingFile = fopen(file, "rb");
+        }
+        if (sendingFile == NULL) printError("opening file for read");
+
+        opcode = DATA_OPCODE;
+        block = 0;
         do {
+            block++;
+            expected_block++;
+
             // CONSTRUCT BUFFER
             bzero(buffer, BUFFER_SIZE);
+            memcpy(&buffer[0], &opcode, 2);
+            memcpy(&buffer[2], &block, 2);
+            int bytes_read = fread(&buffer[4], BUFFER_SIZE - 4, BUFFER_SIZE - 4, sendingFile);
 
 
             // SEND DATA PACKET
@@ -191,13 +227,14 @@ int main(int argc, char **argv) {
             if (bytes_rx < 0) printError("recvfrom not succesful");
 
             // CHECK ACK PACKET
-            strncpy(opcode, &ack_buffer[0], 2);
-            strncpy(block, &ack_buffer[2], 2);
+            memcpy(&opcode, &ack_buffer[0], 2);
+            memcpy(&block, &ack_buffer[2], 2);
 
-            if (atoi(opcode) != ACK_OPCODE) printError("unexpected opcode");
-            if (atoi(block) != expected_block) printError("unexpected block");            
-            expected_block++;
+            if (opcode != ACK_OPCODE) printError("unexpected opcode");
+            if (block  != expected_block) printError("unexpected block");            
         } while(bytes_tx >= BUFFER_SIZE);
+
+
     }
     return 0;
 }
