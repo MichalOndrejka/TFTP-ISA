@@ -53,9 +53,9 @@ void printUsage(char **argv) {
     exit(EXIT_FAILURE);
 }
 
-void handleArgument(int argc, char **argv) {
+void handleArguments(int argc, char **argv) {
     //Check number of argument
-    if (argc < 5 || argc > 9) {
+    if (argc < 3 || argc > 5) {
         printUsage(argv);
     }
 
@@ -83,20 +83,17 @@ void createUDPSocket() {
 
 void configureServerAddress() {
     struct sockaddr_in client_addr_in;
-    memset(&client_addr_in, 0, sizeof(client_addr_in));
+    bzero(&client_addr_in, sizeof(client_addr_in));
     client_addr_in.sin_family = AF_INET;
-    client_addr_in.sin_port = htons(server_port);
     client_addr_in.sin_addr.s_addr = INADDR_ANY;
+    client_addr_in.sin_port = htons(server_port);
 
     client_addr = (struct sockaddr *) &client_addr_in;
-    client_len = sizeof(client_addr);
+    client_len = sizeof(client_addr_in);
 
     if (bind(server_socket, client_addr, client_len) < 0) {
-        printError("bind error");
-    }
-
-    if ((listen(server_socket, 10)) < 0) {
-        perror("listen");
+        perror("bind error");
+        exit(EXIT_FAILURE);
     }
 }
 
@@ -108,7 +105,7 @@ void receiveRqPacket() {
 
     bzero(rq_packet, DATA_PACKET_SIZE);
     bytes_rx = recvfrom(new_socket, rq_packet, DATA_PACKET_SIZE, 0, client_addr, &client_len);
-    if (bytes_rx < 0) printError("recvfrom not succesful");
+    if (bytes_rx < 0) perror("recvfrom not succesful");
 
     // Check the opcode
     memcpy(&opcode, &rq_packet[0], 2);
@@ -153,8 +150,7 @@ void sendDataPacket(int16_t block) {
     memcpy(&data_buffer[0], &opcode, 2);
     memcpy(&data_buffer[2], &block, 2);
 
-    if (block > 0) bytes_read = fread(&data_buffer[4], DATA_PACKET_SIZE - 4, DATA_PACKET_SIZE - 4, file);
-    else if (block == 0) sprintf(&data_buffer[4], "%d", server_port);
+    fread(&data_buffer[4], DATA_PACKET_SIZE - 4, DATA_PACKET_SIZE - 4, file);
     
 
     bytes_tx = sendto(new_socket, data_buffer, 4 + bytes_read, 0, client_addr, client_len);
@@ -183,7 +179,7 @@ void receiveDataPacket(int16_t expected_block) {
     if (fprintf(file, "%s", data) < 0) printError("appending to file");
 }
 
-sendAckPacket(int16_t block) {
+void sendAckPacket(int16_t block) {
     int16_t opcode = ACK_OPCODE;
     char ack_buffer[ACK_PACKET_SIZE];
 
@@ -213,26 +209,20 @@ void receiveAckPacket(int16_t expected_block) {
 }
 
 int main(int argc, char **argv) {
-    handleArgument(argc, argv);
+    handleArguments(argc, argv);
 
     createUDPSocket();
 
     configureServerAddress();
 
     while(true) {
-        new_socket = accept(server_socket, (struct sockaddr *) client_addr, &client_len);
-        if (new_socket < 0) printError("accept");
+        new_socket = server_socket;
+        receiveRqPacket();
 
         pid_t pid = fork();
-        if (pid != 0) { // PARENT PROCESS
-            close(new_socket);
-
+        if (pid != 0) {
             continue;
-        } else { // CHILD PROCESS
-            close(server_socket);
-
-            receiveRqPacket();
-
+        } else {
             int16_t block;
 
             if (send_file) {
@@ -254,7 +244,7 @@ int main(int argc, char **argv) {
 
                 block = 0;
 
-                sendDataPacket(block);
+                sendAckPacket(0);
 
                 block++;
 

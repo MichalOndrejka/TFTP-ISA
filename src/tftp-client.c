@@ -40,6 +40,7 @@ char mode[] = "netascii";
 FILE *file;
 
 void printError(char *error) {
+    perror("");
     fprintf(stderr, "ERROR: %s\n", error);
     exit(EXIT_FAILURE);
 }
@@ -98,7 +99,7 @@ void configureServerAddress() {
     memcpy(&server_addr_in.sin_addr.s_addr, host_info->h_addr_list[0], host_info->h_length);
 
     server_addr = (struct sockaddr *) &server_addr_in;
-    server_len = sizeof(server_addr);
+    server_len = sizeof(server_addr_in);
 
 }
 
@@ -241,7 +242,7 @@ int main(int argc, char **argv) {
 
         sendRqPacket(WRQ_OPCODE);
         
-        receiveDataPacket(block);
+        receiveAckPacket(block);
 
         int new_port = atoi(&data_buffer[4]);
 
