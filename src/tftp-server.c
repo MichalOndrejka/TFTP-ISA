@@ -150,13 +150,51 @@ void sendDataPacket(int16_t block) {
     
     bzero(data_buffer, DATA_PACKET_SIZE);
 
-    bytes_read = fread(&data_buffer[4], DATA_PACKET_SIZE - 4, DATA_PACKET_SIZE - 4, file);
-
     memcpy(&data_buffer[0], &opcode, 2);
     memcpy(&data_buffer[2], &block, 2);
 
+    if (block > 0) bytes_read = fread(&data_buffer[4], DATA_PACKET_SIZE - 4, DATA_PACKET_SIZE - 4, file);
+    else if (block == 0) sprintf(&data_buffer[4], "%d", server_port);
+    
+
     bytes_tx = sendto(new_socket, data_buffer, 4 + bytes_read, 0, client_addr, client_len);
     if (bytes_tx < 0) printError("sendto not successful");
+}
+
+void receiveDataPacket(int16_t expected_block) {
+    int16_t expected_opcode = DATA_OPCODE;
+    int16_t block;
+    int16_t opcode;
+
+    bzero(data_buffer, DATA_PACKET_SIZE);
+    bytes_rx = recvfrom(server_socket, data_buffer, DATA_PACKET_SIZE, 0, client_addr, &client_len);
+    if (bytes_rx < 0) printError("recvfrom not succesful");
+
+    // CHECK OPCODE AND BLOCK NUMBER
+    memcpy(&opcode, &data_buffer[0], 2);
+    if (opcode != expected_opcode) printError("unexpected opcode");
+    memcpy(&block, &data_buffer[2], 2);
+    if (block != expected_block) printError("unexpected block");
+
+    // GET DATA
+    memcpy(data, &data_buffer[4], bytes_rx - 4);
+
+    // HANDLE DATA
+    if (fprintf(file, "%s", data) < 0) printError("appending to file");
+}
+
+sendAckPacket(int16_t block) {
+    int16_t opcode = ACK_OPCODE;
+    char ack_buffer[ACK_PACKET_SIZE];
+
+    // CREATE ACK PACKET
+    bzero(ack_buffer, 4);
+    memcpy(&ack_buffer[0], &opcode, 2);
+    memcpy(&ack_buffer[2], &block, 2);
+
+    // SEND ACK PACKET
+    bytes_tx = sendto(server_socket, ack_buffer, ACK_PACKET_SIZE, 0, client_addr, client_len);
+    if (bytes_tx < 0) printError("sendto not succesful");
 }
 
 void receiveAckPacket(int16_t expected_block) {
@@ -199,7 +237,9 @@ int main(int argc, char **argv) {
 
             if (send_file) {
                 openFile();
+
                 block = 1;
+
                 do {
                     sendDataPacket(block);
 
@@ -211,11 +251,25 @@ int main(int argc, char **argv) {
             } else
             {
                 openFile();
-            }
-            
 
+                block = 0;
+
+                sendDataPacket(block);
+
+                block++;
+
+                do {
+                    receiveDataPacket(block);
+
+                    sendAckPacket(block);
+
+                    block++;
+                } while (bytes_rx >= DATA_PACKET_SIZE);
+            }
 
             break;
         }
     }
+
+    return 0;
 }

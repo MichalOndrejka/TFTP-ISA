@@ -168,7 +168,7 @@ void receiveDataPacket(int16_t expected_block) {
 
     // CHECK OPCODE AND BLOCK NUMBER
     memcpy(&opcode, &data_buffer[0], 2);
-    if (opcode != DATA_OPCODE) printError("unexpected opcode");
+    if (opcode != expected_opcode) printError("unexpected opcode");
     memcpy(&block, &data_buffer[2], 2);
     if (block != expected_block) printError("unexpected block");
 
