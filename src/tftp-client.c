@@ -125,7 +125,6 @@ void openFile() {
         if (file == NULL) printError("creating file");
         fclose(file);
 
-        // APPEND ASCII OR BIN TO FILE
         if (strcmp(mode, "netascii")) {
             file = fopen(dest_file,"a");
         } else if (strcmp(mode, "octet")) {
@@ -133,7 +132,6 @@ void openFile() {
         }
         if (file == NULL) printError("opening file for append");
     } else {
-        // READ ASCII OR BIN FROM FILE
         if (strcmp(mode, "netascii")) {
             file = fopen(filepath,"r");
         } else if (strcmp(mode, "octet")) {
@@ -149,13 +147,14 @@ void closeFile() {
 
 void sendDataPacket(int16_t block) {
     int16_t opcode = DATA_OPCODE;
+
     bzero(data_buffer, DATA_PACKET_SIZE);
     memcpy(&data_buffer[0], &opcode, 2);
     memcpy(&data_buffer[2], &block, 2);
     int bytes_read = fread(&data_buffer[4], DATA_PACKET_SIZE - 4, DATA_PACKET_SIZE - 4, file);
 
     bytes_tx = sendto(sockfd, data_buffer, bytes_read + 4, 0, server_addr, server_len);
-    if (bytes_tx < 0) printError("sendto not succesful");
+    if (bytes_tx < 0) printError("sendto not successful");
 }
 
 void receiveDataPacket(int16_t expected_block) {
@@ -208,7 +207,7 @@ void receiveAckPacket(int16_t expected_block) {
     memcpy(&opcode, &ack_buffer[0], 2);
     if (opcode != ACK_OPCODE) printError("unexpected opcode");
     memcpy(&block, &ack_buffer[2], 2);
-    if (block  != expected_block) printError("unexpected block");    
+    if (block != expected_block) printError("unexpected block");    
 }
 
 int main(int argc, char **argv) {

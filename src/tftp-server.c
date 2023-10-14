@@ -11,7 +11,7 @@
 #include <stdbool.h>
 
 #define TFTP_SERVER_PORT 69
-#define BUFFER_SIZE 512
+#define DATA_PACKET_SIZE 512
 #define ACK_PACKET_SIZE 4
 #define OPCODE_SIZE 2
 #define BLOCK_NUMBER_SIZE 2   
@@ -21,8 +21,26 @@
 #define ACK_OPCODE 4
 #define ERROR_OPCODE 5
 
-int port = TFTP_SERVER_PORT;
+int server_port = TFTP_SERVER_PORT;
 char *root_dirpath = NULL;
+
+int server_socket = -1;
+int new_socket = -1;
+struct sockaddr *client_addr;
+socklen_t client_len;
+
+int bytes_rx;
+int bytes_tx;
+int bytes_read;
+
+char data_buffer[DATA_PACKET_SIZE];
+char data[DATA_PACKET_SIZE - OPCODE_SIZE - BLOCK_NUMBER_SIZE];
+char mode[20];
+
+bool send_file;
+
+
+char filename[512 - OPCODE_SIZE];
 FILE *file;
 
 void printError(char *error) {
@@ -46,7 +64,7 @@ void handleArgument(int argc, char **argv) {
     while ((option = getopt(argc, argv, "p:f:")) != -1) {
         switch (option) {
         case 'p':
-            port = atoi(optarg);
+            server_port = atoi(optarg);
             break;
         case 'f':
             root_dirpath = optarg;
@@ -58,108 +76,142 @@ void handleArgument(int argc, char **argv) {
     }
 }
 
-int main(int argc, char **argv) {
-    handleArgument(argc, argv);
-
-    //CREATE UDP SOCKET
-    int server_socket = -1;
+void createUDPSocket() {
     server_socket = socket(AF_INET, SOCK_DGRAM, 0);
-    if (server_socket <= 0) printError("socket");
+    if (server_socket < 0) printError("Creating socket");
+}
 
-    struct sockaddr_in server_address;
-    memset(&server_address, 0, sizeof(server_address));
-    server_address.sin_family = AF_INET;
-    server_address.sin_port = htons(port);
-    server_address.sin_addr.s_addr = INADDR_ANY;
+void configureServerAddress() {
+    struct sockaddr_in client_addr_in;
+    memset(&client_addr_in, 0, sizeof(client_addr_in));
+    client_addr_in.sin_family = AF_INET;
+    client_addr_in.sin_port = htons(server_port);
+    client_addr_in.sin_addr.s_addr = INADDR_ANY;
 
-    if (bind(server_socket, (struct sockaddr *) &server_address, sizeof(server_address)) < 0) {
+    client_addr = (struct sockaddr *) &client_addr_in;
+    client_len = sizeof(client_addr);
+
+    if (bind(server_socket, client_addr, client_len) < 0) {
         printError("bind error");
     }
 
     if ((listen(server_socket, 10)) < 0) {
         perror("listen");
     }
+}
 
-    char buffer[BUFFER_SIZE];
+void receiveRqPacket() {
     int16_t block;
     int16_t opcode;
-    char data[BUFFER_SIZE - 4];
-    char ack_buffer[ACK_PACKET_SIZE];
-    int bytes_rx;
-    int bytes_tx;
-    int16_t expected_block;
 
-    struct sockaddr *client_addr;
-    socklen_t  client_len = sizeof(client_addr);
+    char rq_packet[DATA_PACKET_SIZE];
+
+    bzero(rq_packet, DATA_PACKET_SIZE);
+    bytes_rx = recvfrom(new_socket, rq_packet, DATA_PACKET_SIZE, 0, client_addr, &client_len);
+    if (bytes_rx < 0) printError("recvfrom not succesful");
+
+    // Check the opcode
+    memcpy(&opcode, &rq_packet[0], 2);
+    if (opcode == RRQ_OPCODE) send_file = true;
+    else if (opcode == WRQ_OPCODE) send_file = false;
+    else printError("unexpected opcode");
+
+    // Get the filename
+    strcpy(filename, &rq_packet[2]); // GET FILENAME
+
+    // Get the mode
+    strcpy(mode, &rq_packet[2 + strlen(filename) + 1]); // GET MODE
+}
+
+void openFile() {
+    if (send_file) {
+        if (strcmp(mode, "netascii")) {
+            file = fopen(filename, "r");
+        } else if (strcmp(mode, "octet")) {
+            file = fopen(filename, "rb");
+        }
+        if (file == NULL) printError("opening file for read");
+    } else {
+        file = fopen(filename, "w");
+        if (file == NULL) printError("creating file");
+        fclose(file);
+
+        if (strcmp(mode, "netascii")) {
+            file = fopen(filename, "a");
+        } else if (strcmp(mode, "netascii")) {
+            file = fopen(filename, "ab");
+        }
+        if (file == NULL) printError("opening file for append");
+    }
+}
+
+void sendDataPacket(int16_t block) {
+    int16_t opcode = DATA_OPCODE;
+    
+    bzero(data_buffer, DATA_PACKET_SIZE);
+
+    bytes_read = fread(&data_buffer[4], DATA_PACKET_SIZE - 4, DATA_PACKET_SIZE - 4, file);
+
+    memcpy(&data_buffer[0], &opcode, 2);
+    memcpy(&data_buffer[2], &block, 2);
+
+    bytes_tx = sendto(new_socket, data_buffer, 4 + bytes_read, 0, client_addr, client_len);
+    if (bytes_tx < 0) printError("sendto not successful");
+}
+
+void receiveAckPacket(int16_t expected_block) {
+    int16_t expected_opcode = ACK_OPCODE;
+    int16_t block;
+    int16_t opcode;
+    char ack_buffer[ACK_PACKET_SIZE];
+
+    bytes_rx = recvfrom(server_socket, ack_buffer, ACK_PACKET_SIZE, 0, client_addr, &client_len);
+    if (bytes_rx < 0) printError("recvfrom not succesful");
+
+    memcpy(&opcode, &ack_buffer[0], 2);
+    if (opcode != ACK_OPCODE) printError("unexpected opcode");
+    memcpy(&block, &ack_buffer[2], 2);
+    if (block != expected_block) printError("unexpected block");
+}
+
+int main(int argc, char **argv) {
+    handleArgument(argc, argv);
+
+    createUDPSocket();
+
+    configureServerAddress();
 
     while(true) {
-        int new_fd = accept(server_socket, (struct sockaddr *) client_addr, &client_len);
-        if (new_fd < 0) printError("accept");
+        new_socket = accept(server_socket, (struct sockaddr *) client_addr, &client_len);
+        if (new_socket < 0) printError("accept");
 
         pid_t pid = fork();
         if (pid != 0) { // PARENT PROCESS
-            close(new_fd);
+            close(new_socket);
+
             continue;
         } else { // CHILD PROCESS
             close(server_socket);
-            // RECEIVE DATA
-            bzero(buffer, BUFFER_SIZE);
-            bytes_rx = recvfrom(new_fd, buffer, BUFFER_SIZE, 0, client_addr, &client_len);
-            if (bytes_rx < 0) printError("recvfrom not succesful");
 
-            memcpy(&opcode, &buffer[0], 2); // GET OPCODE
-            char filename[512];
-            strcpy(filename, &buffer[2]); // GET FILENAME
-            char mode[512];
-            strcpy(mode, &buffer[2 + strlen(filename) + 1]); // GET MODE
+            receiveRqPacket();
 
-            if (opcode == RRQ_OPCODE) {
-                if (strcmp(mode, "netascii")) {
-                    file = fopen(filename, "r");
-                } else if (strcmp(mode, "octet"))
-                {
-                    file = fopen(filename, "rb");
-                }
-                if (file == NULL) printError("opening file for read");
+            int16_t block;
 
-                expected_block = 1;
-                opcode = DATA_OPCODE;
-                int bytes_read = -1;
+            if (send_file) {
+                openFile();
+                block = 1;
                 do {
-                    // SET DATA PACKET
-                    bytes_read = fread(&buffer[4], BUFFER_SIZE - 4, BUFFER_SIZE - 4, file);
+                    sendDataPacket(block);
 
-                    block = expected_block;
-                    memcpy(&buffer[0], &opcode, 2);
-                    memcpy(&buffer[2], &block, 2);
+                    receiveAckPacket(block);
 
-                    // Send the DATA packet
-                    bytes_tx = sendto(new_fd, buffer, 4 + bytes_read, 0, client_addr, client_len);
-                    if (bytes_tx < 0) printError("DATA sendto");
-
-                    // Receive ACK
-                    bzero(ack_buffer, 4);
-                    bytes_rx = recvfrom(new_fd, ack_buffer, ACK_PACKET_SIZE, 0, client_addr, &client_len);
-                    if (bytes_rx < 0) printError("DATA recvfrom");
-
-                    // CHECK ACK PACKET
-                    memcpy(&opcode, &ack_buffer[0], 2);
-                    memcpy(&block, &ack_buffer[2], 2);
-
-                    if (opcode != ACK_OPCODE) printError("unexpected opcode");
-                    if (block  != expected_block) printError("unexpected block"); 
-
-                    expected_block++;
-                } while (bytes_read >= BUFFER_SIZE - 4);
+                    block++;
+                } while (bytes_read >= DATA_PACKET_SIZE - 4);
                 
-            } else if (opcode == WRQ_OPCODE)
+            } else
             {
-                file = fopen(filename, "w");
-                if (file == NULL) printError("creating file");
-                fclose(file);
-
-
-            } else printError("Unexpected opcode");
+                openFile();
+            }
             
 
 
