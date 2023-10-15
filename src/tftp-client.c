@@ -11,7 +11,7 @@
 #include <stdbool.h>
 
 #define TFTP_SERVER_PORT 69
-#define DATA_PACKET_SIZE 512
+#define DATA_PACKET_SIZE 516
 #define ACK_PACKET_SIZE 4
 #define OPCODE_SIZE 2
 #define BLOCK_NUMBER_SIZE 2   
@@ -27,6 +27,7 @@ char *filepath = NULL;
 char *dest_file = NULL;
 
 int sockfd = -1;
+struct sockaddr_in server_addr_in;
 struct sockaddr *server_addr;
 socklen_t server_len;
 
@@ -37,6 +38,7 @@ char data_buffer[DATA_PACKET_SIZE];
 char data[DATA_PACKET_SIZE - OPCODE_SIZE - BLOCK_NUMBER_SIZE];
 char mode[] = "netascii";
 
+char filename[512 - OPCODE_SIZE];
 FILE *file;
 
 void printError(char *error) {
@@ -48,6 +50,29 @@ void printError(char *error) {
 void printUsage(char **argv) {
     fprintf(stderr, "Usage: %s -h <hostname> [-p port] [-f filepath] -t <dest_filepath>\n", argv[0]);
     exit(EXIT_FAILURE);
+}
+
+void printInfo(char *opcode, int16_t block) {
+    char source_ip[INET_ADDRSTRLEN];
+    inet_ntop(AF_INET, &(server_addr_in.sin_addr), source_ip, INET_ADDRSTRLEN);
+    int source_port = ntohs(server_addr_in.sin_port);
+    int dest_port = -1;
+    int code = -1;
+    char message[] = "MESSAGE";
+
+    if (!strcmp(opcode, "RRQ") || !strcmp(opcode, "WRQ")) {
+        printf("%s %s:%d \"%s\" %s", opcode, source_ip, source_port, filename, mode);
+    } else if (!strcmp(opcode, "ACK")) {
+        printf("%s %s:%d %d", opcode, source_ip, source_port, block);
+    } else if (!strcmp(opcode, "OACK")) {
+        printf("%s %s:%d %d", opcode, source_ip, source_port, block);
+    } else if (!strcmp(opcode, "DATA")) {
+        printf("%s %s:%d:%d %d", opcode, source_ip, source_port, dest_port, block);
+    } else if (!strcmp(opcode, "ERROR")) {
+        printf("%s %s:%d:%d %d \"%s\"", opcode, source_ip, source_port, dest_port, code, message);
+    }
+    printf("\n");
+    fflush(stdout);
 }
 
 void handleArguments(int argc, char **argv) {
@@ -91,7 +116,7 @@ void configureServerAddress() {
     struct hostent *host_info = gethostbyname(host);
     if (host_info == NULL) printError("No such host");
 
-    struct sockaddr_in server_addr_in;
+    //struct sockaddr_in server_addr_in;
     bzero(&server_addr_in, sizeof(server_addr_in));
 
     server_addr_in.sin_family = AF_INET;
@@ -103,10 +128,39 @@ void configureServerAddress() {
 
 }
 
+void printPacket(char *packet, int size) {
+    printf("Packet size: %d\n", size);
+    for (int i = 0; i < size; i++) {
+        if (packet[i] == 0) printf("0");
+        else if (packet[i] < 64) printf("%d", packet[i]);
+        else printf("%c", packet[i]);
+    }
+    printf("\n");
+}
+
 void sendRqPacket(int16_t opcode) {
+    printf("sending RQ packet\n");
+    fflush(stdout);
+
     char *filename;
-    if (opcode == RRQ_OPCODE) filename = filepath;
-    else if (opcode == WRQ_OPCODE) filename = dest_file;
+    char str_opcode[4] = "";
+
+    if (opcode == RRQ_OPCODE) {
+        filename = filepath;
+        strcpy(str_opcode, "RRQ");
+    }
+    else if (opcode == WRQ_OPCODE) 
+    {
+        filename = dest_file;
+        strcpy(str_opcode, "WRQ");
+    }
+    char source_ip[INET_ADDRSTRLEN];
+    inet_ntop(AF_INET, &(server_addr_in.sin_addr), source_ip, INET_ADDRSTRLEN);
+    int source_port = ntohs(server_addr_in.sin_port);
+    printf("%s %s:%d \"%s\" %s\n", str_opcode, source_ip, source_port, filename, mode);
+    fflush(stdout);
+
+    opcode = htons(opcode);
     
     int rq_packet_len = 2 + strlen(filename) + 1 + strlen(mode) + 1; // TO DO: EXTENSIONS
     char rq_packet[rq_packet_len];
@@ -121,44 +175,57 @@ void sendRqPacket(int16_t opcode) {
 }
 
 void openFile() {
+    printf("opening file\n");
+    fflush(stdout);
     if (filepath) {
         file = fopen(dest_file, "w");
         if (file == NULL) printError("creating file");
         fclose(file);
 
-        if (strcmp(mode, "netascii")) {
+        if (!strcmp(mode, "netascii")) {
             file = fopen(dest_file,"a");
-        } else if (strcmp(mode, "octet")) {
+        } else if (!strcmp(mode, "octet")) {
             file = fopen(dest_file, "ab");
         }
         if (file == NULL) printError("opening file for append");
     } else {
-        if (strcmp(mode, "netascii")) {
-            file = fopen(filepath,"r");
-        } else if (strcmp(mode, "octet")) {
-            file = fopen(filepath, "rb");
-        }
+        file = stdin;
         if (file == NULL) printError("opening file for read");
     }
 }
 
 void closeFile() {
+    printf("closing file\n");
+    fflush(stdout);
     fclose(file);
 }
 
 void sendDataPacket(int16_t block) {
+    printf("sending DATA packet\n");
+    fflush(stdout);
+
     int16_t opcode = DATA_OPCODE;
+
+    block = htons(block);
+    opcode = htons(opcode);
 
     bzero(data_buffer, DATA_PACKET_SIZE);
     memcpy(&data_buffer[0], &opcode, 2);
     memcpy(&data_buffer[2], &block, 2);
-    int bytes_read = fread(&data_buffer[4], DATA_PACKET_SIZE - 4, DATA_PACKET_SIZE - 4, file);
+    printf("Idem\n");
+    fflush(stdout);
+    int bytes_read = fread(&data_buffer[4], 1, DATA_PACKET_SIZE - 4, file);
+    ferror(file);
+    printf("Idem\n");
 
     bytes_tx = sendto(sockfd, data_buffer, bytes_read + 4, 0, server_addr, server_len);
     if (bytes_tx < 0) printError("sendto not successful");
 }
 
 void receiveDataPacket(int16_t expected_block) {
+    printf("receiving DATA packet\n");
+    fflush(stdout);
+
     int16_t expected_opcode = DATA_OPCODE;
     int16_t block;
     int16_t opcode;
@@ -169,8 +236,10 @@ void receiveDataPacket(int16_t expected_block) {
 
     // CHECK OPCODE AND BLOCK NUMBER
     memcpy(&opcode, &data_buffer[0], 2);
+    opcode = ntohs(opcode);
     if (opcode != expected_opcode) printError("unexpected opcode");
     memcpy(&block, &data_buffer[2], 2);
+    block = ntohs(block);
     if (block != expected_block) printError("unexpected block");
 
     // GET DATA
@@ -181,8 +250,14 @@ void receiveDataPacket(int16_t expected_block) {
 }
 
 void sendAckPacket(int16_t block) {
+    printf("sending ACk packet\n");
+    fflush(stdout);
+
     int16_t opcode = ACK_OPCODE;
     char ack_buffer[ACK_PACKET_SIZE];
+
+    block = htons(block);
+    opcode = htons(opcode);
 
     // CREATE ACK PACKET
     bzero(ack_buffer, 4);
@@ -195,6 +270,9 @@ void sendAckPacket(int16_t block) {
 }
 
 void receiveAckPacket(int16_t expected_block) {
+    printf("receiving ACK packet\n");
+    fflush(stdout);
+
     int16_t expected_opcode = ACK_OPCODE;
     int16_t block;
     int16_t opcode;
@@ -206,8 +284,10 @@ void receiveAckPacket(int16_t expected_block) {
 
     // CHECK OPCODE AND BLOCK NUMBER
     memcpy(&opcode, &ack_buffer[0], 2);
+    opcode = ntohs(opcode);
     if (opcode != ACK_OPCODE) printError("unexpected opcode");
     memcpy(&block, &ack_buffer[2], 2);
+    block = ntohs(block);
     if (block != expected_block) printError("unexpected block");    
 }
 
@@ -221,6 +301,7 @@ int main(int argc, char **argv) {
     int16_t block;
 
     if (filepath) {
+        strcpy(filename, dest_file);
         block = 1;
 
         sendRqPacket(RRQ_OPCODE);
@@ -238,13 +319,21 @@ int main(int argc, char **argv) {
         closeFile();
 
     } else {
+        strcpy(filename, dest_file);
+        if (remove(filename) == 0) {
+            printf("Successfully deleted the file: %s\n", filename);
+        } else {
+            perror("Error deleting the file");  // Print the error message
+        }
         block = 0;
 
         sendRqPacket(WRQ_OPCODE);
         
         receiveAckPacket(block);
 
-        int new_port = atoi(&data_buffer[4]);
+        openFile();
+
+        //int new_port = atoi(&data_buffer[4]);
 
         do {
             sendDataPacket(block);
