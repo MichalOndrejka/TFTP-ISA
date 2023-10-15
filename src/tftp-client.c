@@ -139,26 +139,19 @@ void printPacket(char *packet, int size) {
 }
 
 void sendRqPacket(int16_t opcode) {
-    printf("sending RQ packet\n");
-    fflush(stdout);
-
+    printf("Sending rq\n");
     char *filename;
     char str_opcode[4] = "";
 
     if (opcode == RRQ_OPCODE) {
         filename = filepath;
-        strcpy(str_opcode, "RRQ");
+        printInfo("RRQ", -1);
     }
     else if (opcode == WRQ_OPCODE) 
     {
         filename = dest_file;
-        strcpy(str_opcode, "WRQ");
+        printInfo("WRQ", -1);
     }
-    char source_ip[INET_ADDRSTRLEN];
-    inet_ntop(AF_INET, &(server_addr_in.sin_addr), source_ip, INET_ADDRSTRLEN);
-    int source_port = ntohs(server_addr_in.sin_port);
-    printf("%s %s:%d \"%s\" %s\n", str_opcode, source_ip, source_port, filename, mode);
-    fflush(stdout);
 
     opcode = htons(opcode);
     
@@ -175,8 +168,6 @@ void sendRqPacket(int16_t opcode) {
 }
 
 void openFile() {
-    printf("opening file\n");
-    fflush(stdout);
     if (filepath) {
         file = fopen(dest_file, "w");
         if (file == NULL) printError("creating file");
@@ -195,14 +186,11 @@ void openFile() {
 }
 
 void closeFile() {
-    printf("closing file\n");
-    fflush(stdout);
     fclose(file);
 }
 
 void sendDataPacket(int16_t block) {
-    printf("sending DATA packet\n");
-    fflush(stdout);
+    printInfo("DATA", block);
 
     int16_t opcode = DATA_OPCODE;
 
@@ -212,20 +200,15 @@ void sendDataPacket(int16_t block) {
     bzero(data_buffer, DATA_PACKET_SIZE);
     memcpy(&data_buffer[0], &opcode, 2);
     memcpy(&data_buffer[2], &block, 2);
-    printf("Idem\n");
-    fflush(stdout);
+
     int bytes_read = fread(&data_buffer[4], 1, DATA_PACKET_SIZE - 4, file);
-    ferror(file);
-    printf("Idem\n");
 
     bytes_tx = sendto(sockfd, data_buffer, bytes_read + 4, 0, server_addr, server_len);
     if (bytes_tx < 0) printError("sendto not successful");
 }
 
 void receiveDataPacket(int16_t expected_block) {
-    printf("receiving DATA packet\n");
-    fflush(stdout);
-
+    printf("Receiving data\n");
     int16_t expected_opcode = DATA_OPCODE;
     int16_t block;
     int16_t opcode;
@@ -250,8 +233,7 @@ void receiveDataPacket(int16_t expected_block) {
 }
 
 void sendAckPacket(int16_t block) {
-    printf("sending ACk packet\n");
-    fflush(stdout);
+    printInfo("ACK", block);
 
     int16_t opcode = ACK_OPCODE;
     char ack_buffer[ACK_PACKET_SIZE];
@@ -270,9 +252,7 @@ void sendAckPacket(int16_t block) {
 }
 
 void receiveAckPacket(int16_t expected_block) {
-    printf("receiving ACK packet\n");
-    fflush(stdout);
-
+    printf("Receiving ack\n");
     int16_t expected_opcode = ACK_OPCODE;
     int16_t block;
     int16_t opcode;
@@ -320,7 +300,7 @@ int main(int argc, char **argv) {
 
     } else {
         strcpy(filename, dest_file);
-        if (remove(filename) == 0) {
+         if (remove(filename) == 0) {
             printf("Successfully deleted the file: %s\n", filename);
         } else {
             perror("Error deleting the file");  // Print the error message

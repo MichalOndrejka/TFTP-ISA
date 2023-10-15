@@ -121,6 +121,7 @@ void configureServerAddress() {
 }
 
 void receiveRqPacket() {
+    printf("Receiving rq\n");
     int16_t opcode;
 
     char rq_packet[DATA_PACKET_SIZE];
@@ -136,7 +137,7 @@ void receiveRqPacket() {
 
     if (opcode == RRQ_OPCODE) send_file = true;
     else if (opcode == WRQ_OPCODE) send_file = false;
-    else printError("unexpected opcode");
+    else printError("unexpected opcode while receive eq packet");
 
     // Get the filename
     strcpy(filename, &rq_packet[2]); // GET FILENAME
@@ -148,6 +149,8 @@ void receiveRqPacket() {
 void openFile() {
     strcat(filepath, root_dirpath); // Could be problem here
     strcat(filepath, filename);
+    printf("path: %s\n", filepath);
+    fflush(stdout);
     if (send_file) {
         if (!strcmp(mode, "netascii")) {
             file = fopen(filepath, "r");
@@ -170,6 +173,8 @@ void openFile() {
 }
 
 void sendDataPacket(int16_t block) {
+    printInfo("DATA", block);
+
     int16_t opcode = DATA_OPCODE;
     
     bzero(data_buffer, DATA_PACKET_SIZE);
@@ -180,15 +185,14 @@ void sendDataPacket(int16_t block) {
     memcpy(&data_buffer[0], &opcode, 2);
     memcpy(&data_buffer[2], &block, 2);
 
-    fread(&data_buffer[4], DATA_PACKET_SIZE - 4, DATA_PACKET_SIZE - 4, file);
-
-    printInfo("DATA", block);
+    bytes_read = fread(&data_buffer[4], 1, DATA_PACKET_SIZE - 4, file);
 
     bytes_tx = sendto(server_socket, data_buffer, 4 + bytes_read, 0, client_addr, client_len);
     if (bytes_tx < 0) printError("sendto not successful");
 }
 
 void receiveDataPacket(int16_t expected_block) {
+    printf("Receiving data\n");
     int16_t expected_opcode = DATA_OPCODE;
     int16_t block;
     int16_t opcode;
@@ -200,10 +204,10 @@ void receiveDataPacket(int16_t expected_block) {
     // CHECK OPCODE AND BLOCK NUMBER
     memcpy(&opcode, &data_buffer[0], 2);
     opcode = ntohs(opcode);
-    if (opcode != expected_opcode) printError("unexpected opcode");
+    if (opcode != expected_opcode) printError("unexpected opcode while receive data");
     memcpy(&block, &data_buffer[2], 2);
     block = ntohs(block);
-    if (block != expected_block) printError("unexpected block");
+    if (block != expected_block) printError("unexpected block while receive data");
 
     // GET DATA
     memcpy(data, &data_buffer[4], bytes_rx - 4);
@@ -213,10 +217,9 @@ void receiveDataPacket(int16_t expected_block) {
 }
 
 void sendAckPacket(int16_t block) {
+    printInfo("ACK", block);
     int16_t opcode = ACK_OPCODE;
     char ack_buffer[ACK_PACKET_SIZE];
-
-    printInfo("ACK", block);
 
     block = htons(block);
     opcode = htons(opcode);
@@ -232,6 +235,7 @@ void sendAckPacket(int16_t block) {
 }
 
 void receiveAckPacket(int16_t expected_block) {
+    printf("Receiving ack\n");
     int16_t expected_opcode = ACK_OPCODE;
     int16_t block;
     int16_t opcode;
@@ -240,12 +244,14 @@ void receiveAckPacket(int16_t expected_block) {
     bytes_rx = recvfrom(server_socket, ack_buffer, ACK_PACKET_SIZE, 0, client_addr, &client_len);
     if (bytes_rx < 0) printError("recvfrom not succesful");
 
-    memcpy(&opcode, &ack_buffer[0], 2);
-    opcode = ntohs(opcode);
-    if (opcode != ACK_OPCODE) printError("unexpected opcode");
     memcpy(&block, &ack_buffer[2], 2);
+    memcpy(&opcode, &ack_buffer[0], 2);
+
+    opcode = ntohs(opcode);
     block = ntohs(block);
-    if (block != expected_block) printError("unexpected block");
+    
+    if (opcode != ACK_OPCODE) printError("unexpected opcode while receive ack");
+    if (block != expected_block) printError("unexpected block while receive ack");
 }
 
 int main(int argc, char **argv) {
@@ -260,6 +266,11 @@ int main(int argc, char **argv) {
 
         pid_t pid = fork();
         if (pid != 0) {
+            while (true)
+            {
+                /* code */
+            }
+            
             continue;
         } else {
             int16_t block;
@@ -275,7 +286,8 @@ int main(int argc, char **argv) {
                     receiveAckPacket(block);
 
                     block++;
-                } while (bytes_read >= DATA_PACKET_SIZE - 4);
+                    printf("%d\n", bytes_read);
+                } while (bytes_tx >= DATA_PACKET_SIZE);
                 
             } else
             {
