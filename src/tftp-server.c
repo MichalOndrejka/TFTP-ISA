@@ -22,23 +22,23 @@
 #define ERROR_OPCODE 5
 
 int server_port = TFTP_SERVER_PORT;
+in_addr_t in_addr = INADDR_ANY;
 char *root_dirpath = NULL;
 
 int server_socket = -1;
-struct sockaddr_in client_addr_in;
-struct sockaddr *client_addr;
-socklen_t client_len;
+int sockfd = -1;
+struct sockaddr_in client_addr, server_addr;
+socklen_t client_len = sizeof(client_addr);
 
-int bytes_rx;
-int bytes_tx;
-int bytes_read;
+size_t bytes_rx;
+size_t bytes_tx;
+size_t bytes_read;
 
 char data_buffer[DATA_PACKET_SIZE];
 char data[DATA_PACKET_SIZE - OPCODE_SIZE - BLOCK_NUMBER_SIZE];
 char mode[20];
 
 bool send_file;
-
 
 char filename[512 - OPCODE_SIZE];
 char filepath[1024] = "";
@@ -56,8 +56,8 @@ void printUsage(char **argv) {
 
 void printInfo(char *opcode, int16_t block) {
     char source_ip[INET_ADDRSTRLEN];
-    inet_ntop(AF_INET, &(client_addr_in.sin_addr), source_ip, INET_ADDRSTRLEN);
-    int source_port = ntohs(client_addr_in.sin_port);
+    inet_ntop(AF_INET, &(client_addr.sin_addr), source_ip, INET_ADDRSTRLEN);
+    int source_port = ntohs(client_addr.sin_port);
     int dest_port = -1;
     int code = -1;
     char message[] = "MESSAGE";
@@ -100,34 +100,31 @@ void handleArguments(int argc, char **argv) {
     }
 }
 
-void createUDPSocket() {
-    server_socket = socket(AF_INET, SOCK_DGRAM, 0);
-    if (server_socket < 0) printError("Creating socket");
+void closeUDPSocket(int *udp_socket) {
+    if (*udp_socket == -1) return;
+    close(*udp_socket);
+    *udp_socket = -1;
+}
+
+void createUDPSocket(int *udp_socket) {
+    *udp_socket = socket(AF_INET, SOCK_DGRAM, 0);
+    if (*udp_socket < 0) printError("Creating socket");
 }
 
 void configureServerAddress() {
-    bzero(&client_addr_in, sizeof(client_addr_in));
-    client_addr_in.sin_family = AF_INET;
-    client_addr_in.sin_addr.s_addr = INADDR_ANY;
-    client_addr_in.sin_port = htons(server_port);
-
-    client_addr = (struct sockaddr *) &client_addr_in;
-    client_len = sizeof(client_addr_in);
-
-    if (bind(server_socket, client_addr, client_len) < 0) {
-        perror("bind error");
-        exit(EXIT_FAILURE);
-    }
+    bzero(&server_addr, sizeof(server_addr));
+    server_addr.sin_family = AF_INET;
+    server_addr.sin_addr.s_addr = in_addr;
+    server_addr.sin_port = htons(server_port);
 }
 
 void receiveRqPacket() {
-    printf("Receiving rq\n");
     int16_t opcode;
 
     char rq_packet[DATA_PACKET_SIZE];
     bzero(rq_packet, DATA_PACKET_SIZE);
 
-    bytes_rx = recvfrom(server_socket, rq_packet, DATA_PACKET_SIZE, 0, client_addr, &client_len);
+    bytes_rx = recvfrom(server_socket, rq_packet, DATA_PACKET_SIZE, 0, (struct sockaddr *) &client_addr, &client_len);
     if (bytes_rx < 0) perror("recvfrom not succesful");
 
     // Check the opcode
@@ -149,8 +146,7 @@ void receiveRqPacket() {
 void openFile() {
     strcat(filepath, root_dirpath); // Could be problem here
     strcat(filepath, filename);
-    printf("path: %s\n", filepath);
-    fflush(stdout);
+
     if (send_file) {
         if (!strcmp(mode, "netascii")) {
             file = fopen(filepath, "r");
@@ -172,6 +168,10 @@ void openFile() {
     }
 }
 
+void closeFile() {
+    fclose(file);
+}
+
 void sendDataPacket(int16_t block) {
     printInfo("DATA", block);
 
@@ -187,18 +187,17 @@ void sendDataPacket(int16_t block) {
 
     bytes_read = fread(&data_buffer[4], 1, DATA_PACKET_SIZE - 4, file);
 
-    bytes_tx = sendto(server_socket, data_buffer, 4 + bytes_read, 0, client_addr, client_len);
+    bytes_tx = sendto(sockfd, data_buffer, 4 + bytes_read, 0, (struct sockaddr *) &client_addr, sizeof(client_addr));
     if (bytes_tx < 0) printError("sendto not successful");
 }
 
 void receiveDataPacket(int16_t expected_block) {
-    printf("Receiving data\n");
     int16_t expected_opcode = DATA_OPCODE;
     int16_t block;
     int16_t opcode;
 
     bzero(data_buffer, DATA_PACKET_SIZE);
-    bytes_rx = recvfrom(server_socket, data_buffer, DATA_PACKET_SIZE, 0, client_addr, &client_len);
+    bytes_rx = recvfrom(sockfd, data_buffer, DATA_PACKET_SIZE, 0, (struct sockaddr *) &client_addr, &client_len);
     if (bytes_rx < 0) printError("recvfrom not succesful");
 
     // CHECK OPCODE AND BLOCK NUMBER
@@ -230,18 +229,17 @@ void sendAckPacket(int16_t block) {
     memcpy(&ack_buffer[2], &block, 2);
 
     // SEND ACK PACKET
-    bytes_tx = sendto(server_socket, ack_buffer, ACK_PACKET_SIZE, 0, client_addr, client_len);
+    bytes_tx = sendto(sockfd, ack_buffer, ACK_PACKET_SIZE, 0, (struct sockaddr *) &client_addr, sizeof(client_addr));
     if (bytes_tx < 0) printError("sendto not succesful");
 }
 
 void receiveAckPacket(int16_t expected_block) {
-    printf("Receiving ack\n");
     int16_t expected_opcode = ACK_OPCODE;
     int16_t block;
     int16_t opcode;
     char ack_buffer[ACK_PACKET_SIZE];
 
-    bytes_rx = recvfrom(server_socket, ack_buffer, ACK_PACKET_SIZE, 0, client_addr, &client_len);
+    bytes_rx = recvfrom(sockfd, ack_buffer, ACK_PACKET_SIZE, 0, (struct sockaddr *) &client_addr, &client_len);
     if (bytes_rx < 0) printError("recvfrom not succesful");
 
     memcpy(&block, &ack_buffer[2], 2);
@@ -249,7 +247,7 @@ void receiveAckPacket(int16_t expected_block) {
 
     opcode = ntohs(opcode);
     block = ntohs(block);
-    
+
     if (opcode != ACK_OPCODE) printError("unexpected opcode while receive ack");
     if (block != expected_block) printError("unexpected block while receive ack");
 }
@@ -257,22 +255,27 @@ void receiveAckPacket(int16_t expected_block) {
 int main(int argc, char **argv) {
     handleArguments(argc, argv);
 
-    createUDPSocket();
+    createUDPSocket(&server_socket);
 
     configureServerAddress();
+
+    if (bind(server_socket, (struct sockaddr *) &server_addr, sizeof(server_addr)) < 0) {
+        perror("bind error");
+        exit(EXIT_FAILURE);
+    }
 
     while(true) {
         receiveRqPacket();
 
         pid_t pid = fork();
         if (pid != 0) {
-            while (true)
-            {
-                /* code */
-            }
-            
+            closeUDPSocket(&sockfd);
             continue;
         } else {
+            closeUDPSocket(&server_socket);
+
+            createUDPSocket(&sockfd);
+
             int16_t block;
 
             if (send_file) {
@@ -286,7 +289,6 @@ int main(int argc, char **argv) {
                     receiveAckPacket(block);
 
                     block++;
-                    printf("%d\n", bytes_read);
                 } while (bytes_tx >= DATA_PACKET_SIZE);
                 
             } else
@@ -308,6 +310,9 @@ int main(int argc, char **argv) {
                 } while (bytes_rx >= DATA_PACKET_SIZE);
             }
 
+            closeFile();
+
+            closeUDPSocket(&sockfd);
             break;
         }
     }
