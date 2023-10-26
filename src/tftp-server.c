@@ -21,6 +21,9 @@
 #define ACK_OPCODE 4
 #define ERROR_OPCODE 5
 
+int blksize = 0;
+int timeout = 0;
+
 int server_port = TFTP_SERVER_PORT;
 in_addr_t in_addr = INADDR_ANY;
 char *root_dirpath = NULL;
@@ -116,6 +119,45 @@ void configureServerAddress() {
     server_addr.sin_port = htons(server_port);
 }
 
+void handleOptions(char *rq_packet) {
+    char blcksize_opt[] = "blcksize";
+    int min_blcksize = 8;
+    int max_blcksize = 65464;
+
+    char timeout_opt[] = "timeout";
+    int min_timeout = 1;
+    int max_timeout = 255;
+
+    int filename_len = strlen(&rq_packet[2]);
+    int mode_len = strlen(&rq_packet[2 + filename_len + 1]);
+
+    int bytes_processed = 2 + filename_len + 1 + mode_len + 1;
+
+    char *option;
+    int value;
+
+    while (bytes_processed < (bytes_rx)) {
+        option = &rq_packet[bytes_processed];
+        bytes_processed += strlen(option) + 1;
+
+        if (strcmp(option, blcksize_opt)) {
+            blksize = atoi(&rq_packet[bytes_processed]); //ntohs() ??
+            if (blksize < min_blcksize || blksize > max_blcksize) {
+                printError("invalid value for blksize option");
+            }
+        } else if (strcmp(option, timeout_opt)) {
+            timeout = atoi(&rq_packet[bytes_processed]); //ntohs() ??
+            if (timeout < min_timeout || timeout > max_timeout) {
+                printError("invalid value for timeout option");
+            }
+        } else {
+            printError("invalid option in rq packet");
+        }
+        bytes_processed += strlen(&rq_packet[bytes_processed]) + 1;
+    }
+    
+}
+
 void receiveRqPacket() {
     int16_t opcode;
 
@@ -136,6 +178,10 @@ void receiveRqPacket() {
     strcpy(filename, &rq_packet[2]);
 
     strcpy(mode, &rq_packet[2 + strlen(filename) + 1]);
+
+    if (OPCODE_SIZE + strlen(filename) + 1 + strlen(mode) + 1 < bytes_rx) {
+        handleOptions(rq_packet);
+    }
 }
 
 void openFile() {
