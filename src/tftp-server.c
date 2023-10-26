@@ -78,13 +78,11 @@ void printInfo(char *opcode, int16_t block) {
 }
 
 void handleArguments(int argc, char **argv) {
-    //Check number of argument
     if (argc < 3 || argc > 5) {
         printUsage(argv);
     }
 
     char option;
-    //Get values of arguments
     while ((option = getopt(argc, argv, "p:f:")) != -1) {
         switch (option) {
         case 'p':
@@ -127,7 +125,6 @@ void receiveRqPacket() {
     bytes_rx = recvfrom(server_socket, rq_packet, DATA_PACKET_SIZE, 0, (struct sockaddr *) &client_addr, &client_len);
     if (bytes_rx < 0) perror("recvfrom not succesful");
 
-    // Check the opcode
     memcpy(&opcode, &rq_packet[0], 2);
 
     opcode = ntohs(opcode);
@@ -136,11 +133,9 @@ void receiveRqPacket() {
     else if (opcode == WRQ_OPCODE) send_file = false;
     else printError("unexpected opcode while receive eq packet");
 
-    // Get the filename
-    strcpy(filename, &rq_packet[2]); // GET FILENAME
+    strcpy(filename, &rq_packet[2]);
 
-    // Get the mode
-    strcpy(mode, &rq_packet[2 + strlen(filename) + 1]); // GET MODE
+    strcpy(mode, &rq_packet[2 + strlen(filename) + 1]);
 }
 
 void openFile() {
@@ -200,7 +195,6 @@ void receiveDataPacket(int16_t expected_block) {
     bytes_rx = recvfrom(sockfd, data_buffer, DATA_PACKET_SIZE, 0, (struct sockaddr *) &client_addr, &client_len);
     if (bytes_rx < 0) printError("recvfrom not succesful");
 
-    // CHECK OPCODE AND BLOCK NUMBER
     memcpy(&opcode, &data_buffer[0], 2);
     opcode = ntohs(opcode);
     if (opcode != expected_opcode) printError("unexpected opcode while receive data");
@@ -208,10 +202,8 @@ void receiveDataPacket(int16_t expected_block) {
     block = ntohs(block);
     if (block != expected_block) printError("unexpected block while receive data");
 
-    // GET DATA
     memcpy(data, &data_buffer[4], bytes_rx - 4);
 
-    // HANDLE DATA
     if (fprintf(file, "%s", data) < 0) printError("appending to file");
 }
 
@@ -223,12 +215,10 @@ void sendAckPacket(int16_t block) {
     block = htons(block);
     opcode = htons(opcode);
 
-    // CREATE ACK PACKET
     bzero(ack_buffer, 4);
     memcpy(&ack_buffer[0], &opcode, 2);
     memcpy(&ack_buffer[2], &block, 2);
 
-    // SEND ACK PACKET
     bytes_tx = sendto(sockfd, ack_buffer, ACK_PACKET_SIZE, 0, (struct sockaddr *) &client_addr, sizeof(client_addr));
     if (bytes_tx < 0) printError("sendto not succesful");
 }
