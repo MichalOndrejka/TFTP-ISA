@@ -25,10 +25,6 @@ int sockfd = -1;
 struct sockaddr_in server_addr, recv_addr;
 socklen_t recv_len = sizeof(recv_addr);
 
-int bytes_rx;
-int bytes_tx;
-
-char filename[DATA_PACKET_SIZE - OPCODE_SIZE -2];
 FILE *file;
 
 void closeUDPSocket() {
@@ -49,7 +45,7 @@ void printUsage(char **argv) {
     exit(EXIT_FAILURE);
 }
 
-void printInfo(char *opcode, int16_t block, char *mode, int server_port) {
+void printInfo(char *opcode, int16_t block, char *mode, int server_port, char *filename) {
     char source_ip[INET_ADDRSTRLEN];
     inet_ntop(AF_INET, &server_addr.sin_addr, source_ip, INET_ADDRSTRLEN);
     int source_port = ntohs(server_addr.sin_port);
@@ -126,7 +122,7 @@ void printPacket(char *packet, int size) {
     printf("\n");
 }
 
-void sendRqPacket(int16_t opcode, char *mode, char *filename) {
+void sendRqPacket(int16_t opcode, char *mode, char *filename, int *bytes_tx) {
     opcode = htons(opcode);
     
     int rq_packet_len = 2 + strlen(filename) + 1 + strlen(mode) + 1; // TO DO: EXTENSIONS
@@ -136,8 +132,8 @@ void sendRqPacket(int16_t opcode, char *mode, char *filename) {
     memcpy(&rq_packet[2], filename, strlen(filename));
     memcpy(&rq_packet[2 + strlen(filename) + 1], mode, strlen(mode));
 
-    bytes_tx = sendto(sockfd, rq_packet, rq_packet_len, 0, (struct sockaddr *) &server_addr, sizeof(server_addr));
-    if (bytes_tx < 0) printError("RQ sendto");
+    *bytes_tx = sendto(sockfd, rq_packet, rq_packet_len, 0, (struct sockaddr *) &server_addr, sizeof(server_addr));
+    if (*bytes_tx < 0) printError("RQ sendto");
 
     opcode = ntohs(opcode);
 }
@@ -164,7 +160,7 @@ void closeFile() {
     fclose(file);
 }
 
-void sendDataPacket(int16_t block) {
+void sendDataPacket(int16_t block, int *bytes_tx) {
 
     int16_t opcode = DATA_OPCODE;
 
@@ -178,20 +174,20 @@ void sendDataPacket(int16_t block) {
 
     int bytes_read = fread(&data_buffer[4], 1, DATA_PACKET_SIZE - 4, file);
 
-    bytes_tx = sendto(sockfd, data_buffer, bytes_read + 4, 0, (struct sockaddr *) &server_addr, sizeof(server_addr));
-    if (bytes_tx < 0) printError("sendto not successful");
+    *bytes_tx = sendto(sockfd, data_buffer, bytes_read + 4, 0, (struct sockaddr *) &server_addr, sizeof(server_addr));
+    if (*bytes_tx < 0) printError("sendto not successful");
 }
 
-void receiveDataPacket(int16_t expected_block) {
+void receiveDataPacket(int16_t expected_block, int *bytes_rx) {
     int16_t expected_opcode = DATA_OPCODE;
     int16_t block;
     int16_t opcode;
 
     char data_buffer[DATA_PACKET_SIZE];
     bzero(data_buffer, DATA_PACKET_SIZE);
-    bytes_rx = recvfrom(sockfd, data_buffer, DATA_PACKET_SIZE, 0, (struct sockaddr *) &recv_addr, &recv_len);
+    *bytes_rx = recvfrom(sockfd, data_buffer, DATA_PACKET_SIZE, 0, (struct sockaddr *) &recv_addr, &recv_len);
 
-    if (bytes_rx < 0) printError("recvfrom not succesful");    
+    if (*bytes_rx < 0) printError("recvfrom not succesful");    
 
     memcpy(&opcode, &data_buffer[0], 2);
     opcode = ntohs(opcode);
@@ -203,12 +199,12 @@ void receiveDataPacket(int16_t expected_block) {
 
     char data[DATA_PACKET_SIZE - OPCODE_SIZE - BLOCK_NUMBER_SIZE + 1];
     bzero(data, sizeof(data));
-    memcpy(data, &data_buffer[4], bytes_rx - 4);
+    memcpy(data, &data_buffer[4], *bytes_rx - 4);
 
     if (fprintf(file, "%s", data) < 0) printError("appending to file");
 }
 
-void sendAckPacket(int16_t block) {
+void sendAckPacket(int16_t block, int *bytes_tx) {
 
     int16_t opcode = ACK_OPCODE;
     char ack_buffer[ACK_PACKET_SIZE];
@@ -220,19 +216,19 @@ void sendAckPacket(int16_t block) {
     memcpy(&ack_buffer[0], &opcode, 2);
     memcpy(&ack_buffer[2], &block, 2);
 
-    bytes_tx = sendto(sockfd, ack_buffer, ACK_PACKET_SIZE, 0, (struct sockaddr *) &server_addr, sizeof(server_addr));
-    if (bytes_tx < 0) printError("sendto not succesful");
+    *bytes_tx = sendto(sockfd, ack_buffer, ACK_PACKET_SIZE, 0, (struct sockaddr *) &server_addr, sizeof(server_addr));
+    if (*bytes_tx < 0) printError("sendto not succesful");
 }
 
-void receiveAckPacket(int16_t expected_block) {
+void receiveAckPacket(int16_t expected_block, int *bytes_rx) {
     printf("Receiving ack\n");
     int16_t expected_opcode = ACK_OPCODE;
     int16_t block;
     int16_t opcode;
     char ack_buffer[ACK_PACKET_SIZE];
 
-    bytes_rx = recvfrom(sockfd, ack_buffer, ACK_PACKET_SIZE, 0, (struct sockaddr *) &recv_addr, &recv_len);
-    if (bytes_rx < 0) printError("recvfrom not succesful");
+    *bytes_rx = recvfrom(sockfd, ack_buffer, ACK_PACKET_SIZE, 0, (struct sockaddr *) &recv_addr, &recv_len);
+    if (*bytes_rx < 0) printError("recvfrom not succesful");
 
     memcpy(&opcode, &ack_buffer[0], 2);
     opcode = ntohs(opcode);
@@ -248,7 +244,12 @@ int main(int argc, char **argv) {
     char *filepath = NULL;
     char *dest_file = NULL;
 
+    int bytes_tx = -1;
+    int bytes_rx = -1;
+
     char mode[] = "netascii";
+
+    char filename[DATA_PACKET_SIZE - OPCODE_SIZE -2];
 
     handleArguments(argc, argv, &host, &server_port, &filepath, &dest_file);
 
@@ -262,22 +263,22 @@ int main(int argc, char **argv) {
         strcpy(filename, dest_file);
         block = 1;
 
-        sendRqPacket(RRQ_OPCODE, mode, filepath);
-        printInfo("RRQ", -1, mode, server_port);
+        sendRqPacket(RRQ_OPCODE, mode, filepath, &bytes_tx);
+        printInfo("RRQ", -1, mode, server_port, filename);
 
         openFile(mode, filepath, dest_file);
 
         do {
-            receiveDataPacket(block);
-            printInfo("DATA", block, mode, server_port);
+            receiveDataPacket(block, &bytes_rx);
+            printInfo("DATA", block, mode, server_port, filename);
 
             if (block == 1) {
                 server_port = ntohs(recv_addr.sin_port);
                 configureServerAddress(host, server_port);   
             }
 
-            sendAckPacket(block);
-            printInfo("ACK", block, mode, server_port);
+            sendAckPacket(block, &bytes_tx);
+            printInfo("ACK", block, mode, server_port, filename);
             
             block++;
         } while(bytes_rx >= DATA_PACKET_SIZE);
@@ -288,11 +289,11 @@ int main(int argc, char **argv) {
         strcpy(filename, dest_file);
         block = 0;
 
-        sendRqPacket(WRQ_OPCODE, mode, dest_file);
-        printInfo("WRQ", -1, mode, server_port);
+        sendRqPacket(WRQ_OPCODE, mode, dest_file, &bytes_tx);
+        printInfo("WRQ", -1, mode, server_port, filename);
         
-        receiveAckPacket(block);
-        printInfo("ACK", block, mode, server_port);
+        receiveAckPacket(block, &bytes_rx);
+        printInfo("ACK", block, mode, server_port, filename);
 
         server_port = ntohs(recv_addr.sin_port);
         configureServerAddress(host, server_port);
@@ -301,11 +302,11 @@ int main(int argc, char **argv) {
 
 
         do {
-            sendDataPacket(block);
-            printInfo("DATA", block, mode, server_port);
+            sendDataPacket(block, &bytes_tx);
+            printInfo("DATA", block, mode, server_port, filename);
 
-            receiveAckPacket(block);
-            printInfo("ACK", block, mode, server_port);
+            receiveAckPacket(block, &bytes_rx);
+            printInfo("ACK", block, mode, server_port, filename);
 
             block++;    
         } while(bytes_tx >= DATA_PACKET_SIZE);
