@@ -48,13 +48,13 @@ void printInfo(char *opcode, int16_t block, char *mode, char *filename, bool sen
     char message[] = "MESSAGE";
 
     if (sender_is_server) {
-        inet_ntop(AF_INET, &(server_addr.sin_addr), source_ip, INET_ADDRSTRLEN);
-        source_port = ntohs(server_addr.sin_port);
+        strcpy(source_ip, "0.0.0.0");
+        source_port = -1;
         dest_port = ntohs(client_addr.sin_port);
     } else {
         inet_ntop(AF_INET, &(client_addr.sin_addr), source_ip, INET_ADDRSTRLEN);
         source_port = ntohs(client_addr.sin_port);
-        dest_port = ntohs(server_addr.sin_port);
+        dest_port = -1;
     }
     
 

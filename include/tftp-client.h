@@ -1,5 +1,5 @@
-#ifndef TFTP_H
-#define TFTP_H
+#ifndef TFTP_CLEINT_H
+#define TFTP_CLEINT_H
 
 #include <stdio.h>
 #include <sys/socket.h>
@@ -26,7 +26,7 @@ extern FILE *file;
 void closeUDPSocket(void);
 void printError(char *error);
 void printUsage(char **argv);
-void printInfo(char *opcode, int16_t block, char *mode, int server_port, char *filename);
+void printInfo(char *opcode, int16_t block, char *mode, int server_port, char *filename, bool sender_is_client);
 void handleArguments(int argc, char **argv, char **host, int *server_port, char **filepath, char **dest_file);
 void createUDPSocket(void);
 void configureServerAddress(char *host, int server_port);

@@ -35,13 +35,22 @@ void printUsage(char **argv) {
     exit(EXIT_FAILURE);
 }
 
-void printInfo(char *opcode, int16_t block, char *mode, int server_port, char *filename) {
+void printInfo(char *opcode, int16_t block, char *mode, int server_port, char *filename, bool sender_is_client) {
     char source_ip[INET_ADDRSTRLEN];
-    inet_ntop(AF_INET, &server_addr.sin_addr, source_ip, INET_ADDRSTRLEN);
-    int source_port = ntohs(server_addr.sin_port);
-    int dest_port = server_port;
+    int source_port;
+    int dest_port = -1;
     int code = -1;
     char message[] = "MESSAGE";
+
+    if (sender_is_client) {
+        strcpy(source_ip, "0.0.0.0");
+        source_port = -1;
+        dest_port = ntohs(server_addr.sin_port);
+    } else {
+        inet_ntop(AF_INET, &(server_addr.sin_addr), source_ip, INET_ADDRSTRLEN);
+        source_port = ntohs(server_addr.sin_port);
+        dest_port = -1;
+    }
 
     if (!strcmp(opcode, "RRQ") || !strcmp(opcode, "WRQ")) {
         printf("%s %s:%d \"%s\" %s", opcode, source_ip, source_port, filename, mode);
@@ -254,13 +263,13 @@ int main(int argc, char **argv) {
         block = 1;
 
         sendRqPacket(RRQ_OPCODE, mode, filepath, &bytes_tx);
-        printInfo("RRQ", -1, mode, server_port, filename);
+        printInfo("RRQ", -1, mode, server_port, filename, true);
 
         openFile(mode, filepath, dest_file);
 
         do {
             receiveDataPacket(block, &bytes_rx);
-            printInfo("DATA", block, mode, server_port, filename);
+            printInfo("DATA", block, mode, server_port, filename, false);
 
             if (block == 1) {
                 server_port = ntohs(recv_addr.sin_port);
@@ -268,7 +277,7 @@ int main(int argc, char **argv) {
             }
 
             sendAckPacket(block, &bytes_tx);
-            printInfo("ACK", block, mode, server_port, filename);
+            printInfo("ACK", block, mode, server_port, filename, true);
             
             block++;
         } while(bytes_rx >= DATA_PACKET_SIZE);
@@ -280,10 +289,10 @@ int main(int argc, char **argv) {
         block = 0;
 
         sendRqPacket(WRQ_OPCODE, mode, dest_file, &bytes_tx);
-        printInfo("WRQ", -1, mode, server_port, filename);
+        printInfo("WRQ", -1, mode, server_port, filename, true);
         
         receiveAckPacket(block, &bytes_rx);
-        printInfo("ACK", block, mode, server_port, filename);
+        printInfo("ACK", block, mode, server_port, filename, false);
 
         server_port = ntohs(recv_addr.sin_port);
         configureServerAddress(host, server_port);
@@ -293,10 +302,10 @@ int main(int argc, char **argv) {
 
         do {
             sendDataPacket(block, &bytes_tx);
-            printInfo("DATA", block, mode, server_port, filename);
+            printInfo("DATA", block, mode, server_port, filename, true);
 
             receiveAckPacket(block, &bytes_rx);
-            printInfo("ACK", block, mode, server_port, filename);
+            printInfo("ACK", block, mode, server_port, filename, false);
 
             block++;    
         } while(bytes_tx >= DATA_PACKET_SIZE);
