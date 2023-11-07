@@ -1,5 +1,5 @@
 CC = gcc
-CFLAGS = 
+CFLAGS = -I include
 
 EXECUTABLE1 = bin/tftp-client
 EXECUTABLE2 = bin/tftp-server
