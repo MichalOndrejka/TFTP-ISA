@@ -15,6 +15,13 @@
 #define ACK_OPCODE 4
 #define ERROR_OPCODE 5
 
+// Global variable declarations (if needed outside, otherwise they should be static inside .c file)
+extern int sockfd;
+extern struct sockaddr_in server_addr, recv_addr;
+extern socklen_t recv_len;
+
+extern FILE *file;
+
 // Function declarations
 void closeUDPSocket(void);
 void printError(char *error);

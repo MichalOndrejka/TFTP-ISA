@@ -9,17 +9,7 @@
 #include <sys/types.h>
 #include <getopt.h>
 #include <stdbool.h>
-
-#define TFTP_SERVER_PORT 69
-#define DATA_PACKET_SIZE 516
-#define ACK_PACKET_SIZE 4
-#define OPCODE_SIZE 2
-#define BLOCK_NUMBER_SIZE 2   
-#define RRQ_OPCODE 1
-#define WRQ_OPCODE 2
-#define DATA_OPCODE 3
-#define ACK_OPCODE 4
-#define ERROR_OPCODE 5
+#include "tftp-server.h"
 
 int blksize = 0;
 int timeout = 0;
