@@ -3,10 +3,11 @@
 #include <string.h>
 #include <unistd.h>
 #include <sys/socket.h>
+#include <sys/types.h>
+#include <sys/time.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <netdb.h>
-#include <sys/types.h>
 #include <getopt.h>
 #include <stdbool.h>
 #include "tftp-client.h"
@@ -214,7 +215,11 @@ void sendAckPacket(int16_t block, int *bytes_tx) {
     bzero(ack_buffer, 4);
     memcpy(&ack_buffer[0], &opcode, 2);
     memcpy(&ack_buffer[2], &block, 2);
-
+    while (true)
+    {
+        /* code */
+    }
+    
     *bytes_tx = sendto(sockfd, ack_buffer, ACK_PACKET_SIZE, 0, (struct sockaddr *) &server_addr, sizeof(server_addr));
     if (*bytes_tx < 0) printError("sendto not succesful");
 }
@@ -235,6 +240,26 @@ void receiveAckPacket(int16_t expected_block, int *bytes_rx) {
     memcpy(&block, &ack_buffer[2], 2);
     block = ntohs(block);
     if (block != expected_block) printError("unexpected block while receiving ack");    
+}
+
+void handleTimeout() {
+    int timeout = 5;
+    fd_set fds;
+    struct timeval tv;
+
+    FD_ZERO(&fds);
+    FD_SET(sockfd, &fds);
+
+    tv.tv_sec = timeout;
+    tv.tv_usec = 0;
+
+    int n = select(sockfd + 1, &fds, NULL, NULL, &tv);
+
+    if (n < 0) {
+        printError("select failed");
+    } else if (n == 0) {
+        printError("timed out");
+    }
 }
 
 int main(int argc, char **argv) {
@@ -268,6 +293,8 @@ int main(int argc, char **argv) {
         openFile(mode, filepath, dest_file);
 
         do {
+            handleTimeout();
+
             receiveDataPacket(block, &bytes_rx);
             printInfo("DATA", block, mode, server_port, filename, false);
 
@@ -291,6 +318,7 @@ int main(int argc, char **argv) {
         sendRqPacket(WRQ_OPCODE, mode, dest_file, &bytes_tx);
         printInfo("WRQ", -1, mode, server_port, filename, true);
         
+        handleTimeout();
         receiveAckPacket(block, &bytes_rx);
         printInfo("ACK", block, mode, server_port, filename, false);
 
@@ -304,6 +332,7 @@ int main(int argc, char **argv) {
             sendDataPacket(block, &bytes_tx);
             printInfo("DATA", block, mode, server_port, filename, true);
 
+            handleTimeout();
             receiveAckPacket(block, &bytes_rx);
             printInfo("ACK", block, mode, server_port, filename, false);
 

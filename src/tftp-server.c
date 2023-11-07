@@ -3,10 +3,11 @@
 #include <string.h>
 #include <unistd.h>
 #include <sys/socket.h>
+#include <sys/time.h>
+#include <sys/types.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <netdb.h>
-#include <sys/types.h>
 #include <getopt.h>
 #include <stdbool.h>
 #include "tftp-server.h"
@@ -283,6 +284,26 @@ void receiveAckPacket(int16_t expected_block, size_t *bytes_rx) {
     if (block != expected_block) printError("unexpected block while receive ack");
 }
 
+void handleTimeout() {
+    int timeout = 5;
+    fd_set fds;
+    struct timeval tv;
+
+    FD_ZERO(&fds);
+    FD_SET(sockfd, &fds);
+
+    tv.tv_sec = timeout;
+    tv.tv_usec = 0;
+
+    int n = select(sockfd + 1, &fds, NULL, NULL, &tv);
+
+    if (n < 0) {
+        printError("select failed");
+    } else if (n == 0) {
+        printError("timed out");
+    }
+}
+
 int main(int argc, char **argv) {
     int server_port = TFTP_SERVER_PORT;
     char *root_dirpath = NULL;
@@ -332,6 +353,7 @@ int main(int argc, char **argv) {
                     sendDataPacket(block, &bytes_tx);
                     printInfo("DATA", block, mode, filename, true);
 
+                    handleTimeout();
                     receiveAckPacket(block, &bytes_rx);
                     printInfo("ACK", block, mode, filename, false);
 
@@ -352,6 +374,7 @@ int main(int argc, char **argv) {
                 block++;
 
                 do {
+                    handleTimeout();
                     receiveDataPacket(block, &bytes_rx);
                     printInfo("DATA", block, mode, filename, false);
 
