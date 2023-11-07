@@ -33,7 +33,7 @@ socklen_t recv_len = sizeof(recv_addr);
 int bytes_rx;
 int bytes_tx;
 
-char data_buffer[DATA_PACKET_SIZE];
+//
 char data[DATA_PACKET_SIZE - OPCODE_SIZE - BLOCK_NUMBER_SIZE + 1];
 char mode[] = "netascii";
 
@@ -205,6 +205,7 @@ void sendDataPacket(int16_t block) {
     block = htons(block);
     opcode = htons(opcode);
 
+    char data_buffer[DATA_PACKET_SIZE];
     bzero(data_buffer, DATA_PACKET_SIZE);
     memcpy(&data_buffer[0], &opcode, 2);
     memcpy(&data_buffer[2], &block, 2);
@@ -220,6 +221,7 @@ void receiveDataPacket(int16_t expected_block) {
     int16_t block;
     int16_t opcode;
 
+    char data_buffer[DATA_PACKET_SIZE];
     bzero(data_buffer, DATA_PACKET_SIZE);
     bytes_rx = recvfrom(sockfd, data_buffer, DATA_PACKET_SIZE, 0, (struct sockaddr *) &recv_addr, &recv_len);
 
