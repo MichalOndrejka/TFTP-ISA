@@ -12,8 +12,8 @@
 #include <stdbool.h>
 #include "tftp-server.h"
 
-int blksize = 0;
-int timeout = 0;
+int blksize = DATA_PACKET_SIZE; // default blksize is default TFTP block size
+int timeout = 5; // default timeout is 5s
 
 int server_socket = -1;
 int sockfd = -1;
@@ -135,12 +135,15 @@ void handleOptions(char *rq_packet, size_t bytes_rx) {
         bytes_processed += strlen(option) + 1;
 
         if (strcmp(option, blcksize_opt)) {
-            blksize = atoi(&rq_packet[bytes_processed]); //ntohs() ??
+            blksize = atoi(&rq_packet[bytes_processed]);
+            blksize = ntohs(blksize);
+            blksize += OPCODE_SIZE + BLOCK_NUMBER_SIZE;
             if (blksize < min_blcksize || blksize > max_blcksize) {
                 printError("invalid value for blksize option");
             }
         } else if (strcmp(option, timeout_opt)) {
-            timeout = atoi(&rq_packet[bytes_processed]); //ntohs() ??
+            timeout = atoi(&rq_packet[bytes_processed]);
+            timeout = ntohs(timeout);
             if (timeout < min_timeout || timeout > max_timeout) {
                 printError("invalid value for timeout option");
             }
@@ -210,8 +213,8 @@ void closeFile() {
 void sendDataPacket(int16_t block, size_t *bytes_tx) {
     int16_t opcode = DATA_OPCODE;
     
-    char data_buffer[DATA_PACKET_SIZE];
-    bzero(data_buffer, DATA_PACKET_SIZE);
+    char data_buffer[blksize];
+    bzero(data_buffer, blksize);
 
     block = htons(block);
     opcode = htons(opcode);
@@ -219,7 +222,7 @@ void sendDataPacket(int16_t block, size_t *bytes_tx) {
     memcpy(&data_buffer[0], &opcode, 2);
     memcpy(&data_buffer[2], &block, 2);
 
-    int bytes_read = fread(&data_buffer[4], sizeof(char), DATA_PACKET_SIZE - OPCODE_SIZE - BLOCK_NUMBER_SIZE, file);
+    int bytes_read = fread(&data_buffer[4], sizeof(char), blksize - OPCODE_SIZE - BLOCK_NUMBER_SIZE, file);
 
     *bytes_tx = sendto(sockfd, data_buffer, 4 + bytes_read, 0, (struct sockaddr *) &client_addr, sizeof(client_addr));
     if (*bytes_tx < 0) printError("sendto not successful");
@@ -230,10 +233,10 @@ void receiveDataPacket(int16_t expected_block, size_t *bytes_rx) {
     int16_t block;
     int16_t opcode;
 
-    char data_buffer[DATA_PACKET_SIZE];
-    bzero(data_buffer, DATA_PACKET_SIZE);
+    char data_buffer[blksize];
+    bzero(data_buffer, blksize);
 
-    *bytes_rx = recvfrom(sockfd, data_buffer, DATA_PACKET_SIZE, 0, (struct sockaddr *) &client_addr, &client_len);
+    *bytes_rx = recvfrom(sockfd, data_buffer, blksize, 0, (struct sockaddr *) &client_addr, &client_len);
     if (*bytes_rx < 0) printError("recvfrom not succesful");
 
     memcpy(&opcode, &data_buffer[0], 2);
@@ -243,7 +246,7 @@ void receiveDataPacket(int16_t expected_block, size_t *bytes_rx) {
     block = ntohs(block);
     if (block != expected_block) printError("unexpected block while receive data");
 
-    char data[DATA_PACKET_SIZE - OPCODE_SIZE - BLOCK_NUMBER_SIZE];
+    char data[blksize - OPCODE_SIZE - BLOCK_NUMBER_SIZE];
     bzero(data, sizeof(data));
     memcpy(data, &data_buffer[4], *bytes_rx - 4);
 
@@ -285,7 +288,6 @@ void receiveAckPacket(int16_t expected_block, size_t *bytes_rx) {
 }
 
 void handleTimeout() {
-    int timeout = 5;
     fd_set fds;
     struct timeval tv;
 

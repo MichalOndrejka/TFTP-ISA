@@ -215,11 +215,7 @@ void sendAckPacket(int16_t block, int *bytes_tx) {
     bzero(ack_buffer, 4);
     memcpy(&ack_buffer[0], &opcode, 2);
     memcpy(&ack_buffer[2], &block, 2);
-    while (true)
-    {
-        /* code */
-    }
-    
+
     *bytes_tx = sendto(sockfd, ack_buffer, ACK_PACKET_SIZE, 0, (struct sockaddr *) &server_addr, sizeof(server_addr));
     if (*bytes_tx < 0) printError("sendto not succesful");
 }
