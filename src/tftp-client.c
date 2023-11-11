@@ -160,6 +160,31 @@ void closeFile() {
     fclose(file);
 }
 
+void handleErrorPacket(char *packet) {
+    uint16_t errorCode;
+    memcpy(&errorCode, &packet[2], 2);
+
+    char *errMsg = &packet[4];
+    printError(errMsg);
+}
+
+void sendErrorPacket(int errorCode, char *errMsg) {
+    int16_t opcode = ERROR_OPCODE;
+
+    errorCode = htons(errorCode);
+    opcode = htons(opcode);
+
+    int error_packet_len = 2 + 2 + strlen(errMsg) + 1;
+    char error_buffer[error_packet_len];
+    bzero(error_buffer, sizeof(error_buffer));
+    memcpy(&error_buffer[0], &opcode, 2);
+    memcpy(&error_buffer[2], &errorCode, 2);
+    memcpy(&error_buffer[2], errMsg, strlen(errMsg));
+
+    int bytes_tx = sendto(sockfd, error_buffer, error_packet_len, 0, (struct sockaddr *) &server_addr, sizeof(server_addr));
+    if (bytes_tx < 0) printError("sendto not successful");
+}
+
 void sendDataPacket(int16_t block, int *bytes_tx) {
 
     int16_t opcode = DATA_OPCODE;
@@ -191,7 +216,8 @@ void receiveDataPacket(int16_t expected_block, int *bytes_rx) {
 
     memcpy(&opcode, &data_buffer[0], 2);
     opcode = ntohs(opcode);
-    if (opcode != expected_opcode) printError("unexpected opcode while receiving data");
+    if (opcode == ERROR_OPCODE) handleErrorPacket(data_buffer);
+    else if (opcode != expected_opcode) printError("unexpected opcode while receiving data");
 
     memcpy(&block, &data_buffer[2], 2);
     block = ntohs(block);
@@ -205,7 +231,6 @@ void receiveDataPacket(int16_t expected_block, int *bytes_rx) {
 }
 
 void sendAckPacket(int16_t block, int *bytes_tx) {
-
     int16_t opcode = ACK_OPCODE;
     char ack_buffer[ACK_PACKET_SIZE];
 
@@ -232,7 +257,8 @@ void receiveAckPacket(int16_t expected_block, int *bytes_rx) {
 
     memcpy(&opcode, &ack_buffer[0], 2);
     opcode = ntohs(opcode);
-    if (opcode != ACK_OPCODE) printError("unexpected opcod while receiving ack");
+    if (opcode == ERROR_OPCODE) handleErrorPacket(ack_buffer);
+    else if (opcode != ACK_OPCODE) printError("unexpected opcod while receiving ack");
     memcpy(&block, &ack_buffer[2], 2);
     block = ntohs(block);
     if (block != expected_block) printError("unexpected block while receiving ack");    

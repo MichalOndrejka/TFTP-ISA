@@ -155,6 +155,31 @@ void handleOptions(char *rq_packet, size_t bytes_rx) {
     
 }
 
+void handleErrorPacket(char *packet) {
+    uint16_t errorCode;
+    memcpy(&errorCode, &packet[2], 2);
+
+    char *errMsg = &packet[4];
+    printError(errMsg);
+}
+
+void sendErrorPacket(int errorCode, char *errMsg) {
+    int16_t opcode = ERROR_OPCODE;
+
+    errorCode = htons(errorCode);
+    opcode = htons(opcode);
+
+    int error_packet_len = 2 + 2 + strlen(errMsg) + 1;
+    char error_buffer[error_packet_len];
+    bzero(error_buffer, sizeof(error_buffer));
+    memcpy(&error_buffer[0], &opcode, 2);
+    memcpy(&error_buffer[2], &errorCode, 2);
+    memcpy(&error_buffer[2], errMsg, strlen(errMsg));
+
+    int bytes_tx = sendto(sockfd, error_buffer, error_packet_len, 0, (struct sockaddr *) &server_addr, sizeof(server_addr));
+    if (bytes_tx < 0) printError("sendto not successful");
+}
+
 void receiveRqPacket(size_t *bytes_rx, char *mode, bool *send_file, char *filename) {
     int16_t opcode;
 
@@ -168,7 +193,8 @@ void receiveRqPacket(size_t *bytes_rx, char *mode, bool *send_file, char *filena
 
     opcode = ntohs(opcode);
 
-    if (opcode == RRQ_OPCODE) *send_file = true;
+    if (opcode == ERROR_OPCODE) handleErrorPacket(rq_packet);
+    else if (opcode == RRQ_OPCODE) *send_file = true;
     else if (opcode == WRQ_OPCODE) *send_file = false;
     else printError("unexpected opcode while receive eq packet");
 
@@ -241,7 +267,8 @@ void receiveDataPacket(int16_t expected_block, size_t *bytes_rx) {
 
     memcpy(&opcode, &data_buffer[0], 2);
     opcode = ntohs(opcode);
-    if (opcode != expected_opcode) printError("unexpected opcode while receive data");
+    if (opcode == ERROR_OPCODE) handleErrorPacket(data_buffer);
+    else if (opcode != expected_opcode) printError("unexpected opcode while receive data");
     memcpy(&block, &data_buffer[2], 2);
     block = ntohs(block);
     if (block != expected_block) printError("unexpected block while receive data");
@@ -283,7 +310,8 @@ void receiveAckPacket(int16_t expected_block, size_t *bytes_rx) {
     opcode = ntohs(opcode);
     block = ntohs(block);
 
-    if (opcode != ACK_OPCODE) printError("unexpected opcode while receive ack");
+    if (opcode == ERROR_OPCODE) handleErrorPacket(ack_buffer);
+    else if (opcode != ACK_OPCODE) printError("unexpected opcode while receive ack");
     if (block != expected_block) printError("unexpected block while receive ack");
 }
 
