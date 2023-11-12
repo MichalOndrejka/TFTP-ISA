@@ -1,3 +1,10 @@
+/* tftp-client.h ********************************************************
+ * Name: Michal
+ * Surname: Ondrejka
+ * Login: xondre15
+ * **********************************************************************
+ */
+
 #ifndef TFTP_CLEINT_H
 #define TFTP_CLEINT_H
 

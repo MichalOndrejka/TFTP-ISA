@@ -1,3 +1,10 @@
+/* tftp-server.h ********************************************************
+ * Name: Michal
+ * Surname: Ondrejka
+ * Login: xondre15
+ * **********************************************************************
+ */
+
 #ifndef TFTP_SERVER_H
 #define TFTP_SERVER_H
 

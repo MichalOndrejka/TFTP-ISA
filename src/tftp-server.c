@@ -1,3 +1,10 @@
+/* tftp-server.c ********************************************************
+ * Name: Michal
+ * Surname: Ondrejka
+ * Login: xondre15
+ * **********************************************************************
+ */
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
