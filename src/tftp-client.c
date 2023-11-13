@@ -10,8 +10,8 @@
 #include <string.h>
 #include <unistd.h>
 #include <sys/socket.h>
-#include <sys/types.h>
 #include <sys/time.h>
+#include <sys/types.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <netdb.h>
@@ -23,12 +23,13 @@ int sockfd;
 struct sockaddr_in server_addr, recv_addr;
 socklen_t recv_len = sizeof(recv_addr);
 
-FILE *file;
+FILE *file = NULL;
 
 void printError(char *error) {
     fprintf(stdout, "ERROR: %s\n", error);
     fflush(stdout);
     closeUDPSocket();
+    if (file) fclose(file);
     exit(EXIT_FAILURE);
 }
 
@@ -151,6 +152,41 @@ void handleErrorPacket(char *packet) {
 
     char *errMsg = &packet[4];
     printError(errMsg);
+
+    struct sockaddr_in client_addr;
+    socklen_t client_len = sizeof(client_addr);
+    if (getsockname(sockfd, (struct sockaddr *)&client_addr, &client_len) < 0) {
+        perror("getsockname failed");
+        exit(EXIT_FAILURE);
+    }
+    printErrorPacket(inet_ntoa(server_addr.sin_addr), ntohs(server_addr.sin_port), ntohs(client_addr.sin_port), ntohs(errorCode), errMsg);
+}
+
+int sendErrorPacket(int errorCode, char *errMsg) {
+    int16_t opcode = ERROR_OPCODE;
+
+    errorCode = htons(errorCode);
+    opcode = htons(opcode);
+
+    int error_packet_len = 2 + 2 + strlen(errMsg) + 1;
+    char error_buffer[error_packet_len];
+    bzero(error_buffer, sizeof(error_buffer));
+    memcpy(&error_buffer[0], &opcode, 2);
+    memcpy(&error_buffer[2], &errorCode, 2);
+    memcpy(&error_buffer[2], errMsg, strlen(errMsg));
+
+    int bytes_tx = sendto(sockfd, error_buffer, error_packet_len, 0, (struct sockaddr *) &server_addr, sizeof(server_addr));
+    if (bytes_tx < 0) printError("sendto not successful");
+
+    struct sockaddr_in client_addr;
+    socklen_t client_len = sizeof(client_addr);
+    if (getsockname(sockfd, (struct sockaddr *)&client_addr, &client_len) < 0) {
+        perror("getsockname failed");
+        exit(EXIT_FAILURE);
+    }
+    printErrorPacket(inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port), ntohs(server_addr.sin_port), ntohs(errorCode), errMsg);
+
+    return bytes_tx;
 }
 
 int sendRqPacket(uint16_t opcode, char *filename, char *mode, int blksize, int timeout) {
@@ -158,7 +194,7 @@ int sendRqPacket(uint16_t opcode, char *filename, char *mode, int blksize, int t
     
     int rq_packet_len = 2 + strlen(filename) + 1 + strlen(mode) + 1; // TO DO: EXTENSIONS
     char rq_packet[rq_packet_len];
-    bzero(&rq_packet, sizeof(rq_packet));
+    bzero(rq_packet, sizeof(rq_packet));
 
     memcpy(&rq_packet[0], &opcode, 2);
     memcpy(&rq_packet[2], filename, strlen(filename));
@@ -242,9 +278,7 @@ int receiveDataPacket(uint16_t expected_block, uint16_t blksize) {
         perror("getsockname failed");
         exit(EXIT_FAILURE);
     }
-    char source_ip[INET_ADDRSTRLEN];
-    inet_ntop(AF_INET, &(server_addr.sin_addr), source_ip, INET_ADDRSTRLEN);
-    printDataPacket(source_ip, ntohs(server_addr.sin_port), ntohs(client_addr.sin_port), block);
+    printDataPacket(inet_ntoa(recv_addr.sin_addr), ntohs(recv_addr.sin_port), ntohs(client_addr.sin_port), block);
 
     return bytes_rx;
 }
@@ -301,31 +335,9 @@ int receiveAckPacket(uint16_t expected_block) {
         perror("getsockname failed");
         exit(EXIT_FAILURE);
     }
-    char source_ip[INET_ADDRSTRLEN];
-    inet_ntop(AF_INET, &(server_addr.sin_addr), source_ip, INET_ADDRSTRLEN);
-    printAckPacket(source_ip, ntohs(server_addr.sin_port), ntohs(expected_block), -1, -1);
+    printAckPacket(inet_ntoa(server_addr.sin_addr), ntohs(server_addr.sin_port), ntohs(expected_block), -1, -1);
 
     return bytes_rx;
-}
-
-int sendErrorPacket(int errorCode, char *errMsg) {
-    uint16_t opcode = ERROR_OPCODE;
-
-    opcode = htons(opcode);
-    errorCode = htons(errorCode);
-
-    int error_packet_len = 2 + 2 + strlen(errMsg) + 1;
-    char error_buffer[error_packet_len];
-    bzero(error_buffer, sizeof(error_buffer));
-
-    memcpy(&error_buffer[0], &opcode, 2);
-    memcpy(&error_buffer[2], &errorCode, 2);
-    memcpy(&error_buffer[4], errMsg, strlen(errMsg));
-
-    int bytes_tx = sendto(sockfd, error_buffer, error_packet_len, 0, (struct sockaddr *) &server_addr, sizeof(server_addr));
-    if (bytes_tx < 0) printError("sendto not successful");
-
-    return bytes_tx;
 }
 
 void handleTimeout(int timeout) {
@@ -365,7 +377,7 @@ int main(int argc, char **argv) {
 
     uint16_t block;
 
-    if (filepath) { //download
+    if (filepath) {
         block = 1;
         int bytes_rx = -1;
 
@@ -388,7 +400,7 @@ int main(int argc, char **argv) {
             block++;
         } while(bytes_rx >= DATA_PACKET_SIZE);
 
-    } else { // upload
+    } else {
         block = 0;
         int bytes_tx = -1;
 

@@ -38,18 +38,18 @@ extern FILE *file;
 void printError(char *error);
 void printUsage(char **argv);
 void printPacket(char *packet, int size);
-void printInfo(char *opcode, int16_t block, char *mode, char *filename, bool sender_is_server);
+void printInfo(char *opcode, uint16_t block, char *mode, char *filename, bool sender_is_server);
 void handleArguments(int argc, char **argv, int *server_port, char **root_dirpath);
 void closeUDPSocket(int *udp_socket);
 void createUDPSocket(int *udp_socket);
 void configureServerAddress(int server_port);
 void handleOptions(char *rq_packet, size_t bytes_rx);
-void receiveRqPacket(size_t *bytes_rx, char *mode, bool *send_file, char *filename);
-void openFile(char *root_dirpath, char *mode, bool send_file, char *filename, char *filepath);
+int receiveRqPacket(char *mode, char *filename, bool *send_file);
+void openFile(char *root_dirpath, char *mode, char *filename, bool send_file);
 void closeFile(void);
-void sendDataPacket(int16_t block, size_t *bytes_tx);
-void receiveDataPacket(int16_t expected_block, size_t *bytes_rx);
-void sendAckPacket(int16_t block, size_t *bytes_tx);
-void receiveAckPacket(int16_t expected_block, size_t *bytes_rx);
+int sendDataPacket(uint16_t block);
+int receiveDataPacket(uint16_t expected_block);
+int sendAckPacket(uint16_t block);
+int receiveAckPacket(uint16_t expected_block);
 
 #endif
