@@ -10,8 +10,14 @@ task is to implement a client and server application for file transfer via TFTP 
 # Extensions and limitiations
 
 # Startup
+## Download
 
-client: ./tftp-client -h 127.0.0.1 -p 5000 -f file.txt -t client/file.txt
+client: ./tftp-client -h 127.0.0.1 -p 5000 -f file_download.txt -t client/file.txt
+server: ./tftp-server -p 5000 -f server/
+
+## Upload
+
+client: ./tftp-client -h 127.0.0.1 -p 5000 -t file_upload.txt
 server: ./tftp-server -p 5000 -f server/
 
 # List of submitted files

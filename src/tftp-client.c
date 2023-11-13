@@ -167,10 +167,16 @@ int sendRqPacket(uint16_t opcode, char *filename, char *mode, int blksize, int t
     int bytes_tx = sendto(sockfd, rq_packet, rq_packet_len, 0, (struct sockaddr *) &server_addr, sizeof(server_addr));
     if (bytes_tx < 0) printError("RQ sendto");
 
+    struct sockaddr_in client_addr;
+    socklen_t client_len = sizeof(client_addr);
+    if (getsockname(sockfd, (struct sockaddr *)&client_addr, &client_len) < 0) {
+        perror("getsockname failed");
+        exit(EXIT_FAILURE);
+    }
     if (ntohs(opcode) == RRQ_OPCODE) {
-        printRqPacket("RRQ", "0.0.0.0", -1, filename, mode, blksize, timeout);
+        printRqPacket("RRQ", inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port), filename, mode, blksize, timeout);
     } else if (ntohs(opcode) == WRQ_OPCODE) {
-        printRqPacket("WRQ", "0.0.0.0", -1, filename, mode, blksize, timeout);
+        printRqPacket("WRQ", inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port), filename, mode, blksize, timeout);
     }
 
     return bytes_tx;
@@ -187,12 +193,18 @@ int sendDataPacket(uint16_t block, uint16_t blksize) {
     memcpy(&packet_buffer[0], &opcode, 2);
     memcpy(&packet_buffer[2], &block, 2);
 
-    int bytes_read = fread(&packet_buffer[4], 1, DATA_PACKET_SIZE - 4, file);
+    int bytes_read = fread(&packet_buffer[4], 1, DATA_PACKET_SIZE - 4, file); // Upload needs DATA_PACKET_SIZE of chars to send data packet!! <= FIX
 
     int bytes_tx = sendto(sockfd, packet_buffer, bytes_read + 4, 0, (struct sockaddr *) &server_addr, sizeof(server_addr));
     if (bytes_tx < 0) printError("sendto not successful");
 
-    printDataPacket("0.0.0.0", -1, ntohs(server_addr.sin_port), ntohs(block));
+    struct sockaddr_in client_addr;
+    socklen_t client_len = sizeof(client_addr);
+    if (getsockname(sockfd, (struct sockaddr *)&client_addr, &client_len) < 0) {
+        perror("getsockname failed");
+        exit(EXIT_FAILURE);
+    }
+    printDataPacket(inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port), ntohs(server_addr.sin_port), ntohs(block));
 
     return bytes_tx;
 }
@@ -224,9 +236,15 @@ int receiveDataPacket(uint16_t expected_block, uint16_t blksize) {
     memcpy(data, &packet_buffer[4], bytes_rx - 4);
     if (fprintf(file, "%s", data) < 0) printError("appending to file");
 
+    struct sockaddr_in client_addr;
+    socklen_t client_len = sizeof(client_addr);
+    if (getsockname(sockfd, (struct sockaddr *)&client_addr, &client_len) < 0) {
+        perror("getsockname failed");
+        exit(EXIT_FAILURE);
+    }
     char source_ip[INET_ADDRSTRLEN];
     inet_ntop(AF_INET, &(server_addr.sin_addr), source_ip, INET_ADDRSTRLEN);
-    printDataPacket(source_ip, ntohs(server_addr.sin_port), -1, block);
+    printDataPacket(source_ip, ntohs(server_addr.sin_port), ntohs(client_addr.sin_port), block);
 
     return bytes_rx;
 }
@@ -246,7 +264,13 @@ int sendAckPacket(uint16_t block) {
     int bytes_tx = sendto(sockfd, packet_buffer, ACK_PACKET_SIZE, 0, (struct sockaddr *) &server_addr, sizeof(server_addr));
     if (bytes_tx < 0) printError("sendto not succesful");
 
-    printAckPacket("0.0.0.0", -1, ntohs(block), -1, -1);
+    struct sockaddr_in client_addr;
+    socklen_t client_len = sizeof(client_addr);
+    if (getsockname(sockfd, (struct sockaddr *)&client_addr, &client_len) < 0) {
+        perror("getsockname failed");
+        exit(EXIT_FAILURE);
+    }
+    printAckPacket(inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port), ntohs(block), -1, -1);
 
     return bytes_tx;
 }
@@ -271,6 +295,12 @@ int receiveAckPacket(uint16_t expected_block) {
     else if (opcode != ACK_OPCODE) printError("unexpected opcod while receiving ack");
     if (block != expected_block) printError("unexpected block while receiving ack");
 
+    struct sockaddr_in client_addr;
+    socklen_t client_len = sizeof(client_addr);
+    if (getsockname(sockfd, (struct sockaddr *)&client_addr, &client_len) < 0) {
+        perror("getsockname failed");
+        exit(EXIT_FAILURE);
+    }
     char source_ip[INET_ADDRSTRLEN];
     inet_ntop(AF_INET, &(server_addr.sin_addr), source_ip, INET_ADDRSTRLEN);
     printAckPacket(source_ip, ntohs(server_addr.sin_port), ntohs(expected_block), -1, -1);
