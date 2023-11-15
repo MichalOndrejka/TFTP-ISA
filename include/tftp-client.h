@@ -33,7 +33,7 @@ extern FILE *file;
 
 // Function declarations
 void closeUDPSocket(void);
-void printError(char *error);
+void printError(char *error, bool exit_failure);
 void printUsage(char **argv);
 void printInfo(char *opcode, uint16_t block, char *filename, char *mode, int server_port, bool sender_is_client);
 void handleArguments(int argc, char **argv, char **host, int *server_port, char **filepath, char **dest_file);
@@ -43,7 +43,7 @@ void printPacket(char *packet, int size);
 int sendRqPacket(uint16_t opcode, char *filename, char *mode, int blksize, int timeout);
 void openFile(char *mode, char *filepath, char *dest_file);
 void closeFile(void);
-int sendDataPacket(uint16_t block, uint16_t blksize);
+int sendDataPacket(uint16_t block, uint16_t blksize, bool is_retransmit);
 int receiveDataPacket(uint16_t expected_block, uint16_t blksize);
 int sendAckPacket(uint16_t block);
 int receiveAckPacket(uint16_t expected_block);

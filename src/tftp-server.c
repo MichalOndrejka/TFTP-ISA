@@ -443,6 +443,7 @@ int main(int argc, char **argv) {
                 block = 1;
 
                 do {
+                    while(true);
                     bytes_tx = sendDataPacket(block);
 
                     handleTimeout();
