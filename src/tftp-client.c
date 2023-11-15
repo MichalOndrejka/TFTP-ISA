@@ -194,9 +194,9 @@ int sendErrorPacket(int errorCode, char *errMsg) {
 
 int sendRqPacket(uint16_t opcode, char *filename, char *mode, int blksize, int timeout) {
     opcode = htons(opcode);
-    
+
     int opts_len = 0;
-    char blcksize_opt[] = "blcksize";
+    char blksize_opt[] = "blksize";
     char timeout_opt[] = "timeout";
     char blksize_val[64];
     bzero(blksize_val, sizeof(blksize_val));
@@ -204,7 +204,7 @@ int sendRqPacket(uint16_t opcode, char *filename, char *mode, int blksize, int t
     char timeout_val[64];
     bzero(timeout_val, sizeof(timeout_val));
     sprintf(timeout_val, "%d", timeout);
-    if (blksize != DEFAULT_BLKSIZE) opts_len += strlen(blcksize_opt) + 1 + strlen(blksize_val) + 1;
+    if (blksize != DEFAULT_BLKSIZE) opts_len += strlen(blksize_opt) + 1 + strlen(blksize_val) + 1;
     if (timeout != DEFAULT_TIMEOUT) opts_len += strlen(timeout_opt) + 1 + strlen(timeout_val) + 1;
 
     int packet_buffer_len = 2 + strlen(filename) + 1 + strlen(mode) + 1 + opts_len; // TO DO: EXTENSIONS
@@ -220,15 +220,16 @@ int sendRqPacket(uint16_t opcode, char *filename, char *mode, int blksize, int t
     curr_byte += strlen(mode) + 1;
 
     if (blksize != DEFAULT_BLKSIZE) {
-        memcpy(&packet_buffer[curr_byte], &blcksize_opt, strlen(blcksize_opt));
-        curr_byte += strlen(blcksize_opt) + 1;
+        memcpy(&packet_buffer[curr_byte], &blksize_opt, strlen(blksize_opt));
+        curr_byte += strlen(blksize_opt) + 1;
         memcpy(&packet_buffer[curr_byte], &blksize_val, strlen(blksize_val));
         curr_byte += strlen(blksize_val) + 1;
+        printf("%d\n", opcode);
     }
     if (timeout != DEFAULT_TIMEOUT) {
-        memcpy(&packet_buffer[curr_byte], &timeout_opt, sizeof(timeout_opt));
+        memcpy(&packet_buffer[curr_byte], &timeout_opt, strlen(timeout_opt));
         curr_byte += strlen(timeout_opt) + 1;
-        memcpy(&packet_buffer[curr_byte], &timeout_val, sizeof(timeout_val));
+        memcpy(&packet_buffer[curr_byte], &timeout_val, strlen(timeout_val)); // tu
         curr_byte += strlen(timeout_val) + 1;
     }
 
@@ -250,18 +251,20 @@ int sendDataPacket(uint16_t block, uint16_t blksize, bool is_retransmit) {
     opcode = htons(opcode);
     block = htons(block);
 
-    static char packet_buffer[DATA_PACKET_SIZE];
-    static int bytes_read;
-    bzero(packet_buffer, DATA_PACKET_SIZE);
+    char packet_buffer[blksize + OPCODE_SIZE + BLOCK_NUMBER_SIZE];
+    bzero(packet_buffer, sizeof(packet_buffer));
     memcpy(&packet_buffer[0], &opcode, 2);
     memcpy(&packet_buffer[2], &block, 2);
 
-    if (!is_retransmit) {
-        if (file == stdin) bytes_read = read(STDIN_FILENO, &packet_buffer[4], DATA_PACKET_SIZE - 4);
-        else bytes_read = fread(&packet_buffer[4], 1, DATA_PACKET_SIZE - 4, file);
-    } 
+    if (is_retransmit) {
+        if (fseek(file, -blksize, SEEK_CUR) != 0) {
+            printError("fseek failed", true);
+        }
+    }
 
-    int bytes_tx = sendto(sockfd, packet_buffer, bytes_read + 4, 0, (struct sockaddr *) &server_addr, sizeof(server_addr));
+    int bytes_read = fread(&packet_buffer[4], sizeof(char), blksize, file);
+
+    int bytes_tx = sendto(sockfd, packet_buffer, bytes_read + OPCODE_SIZE + BLOCK_NUMBER_SIZE, 0, (struct sockaddr *) &server_addr, sizeof(server_addr));
     if (bytes_tx < 0) printError("sendto not successful", true);
 
     printDataPacket(inet_ntoa(src_addr.sin_addr), ntohs(src_addr.sin_port), ntohs(server_addr.sin_port), ntohs(block));
@@ -370,7 +373,7 @@ int handleTimeout(int timeout) {
 int main(int argc, char **argv) {
     char mode[] = "netascii";
     int blksize = DEFAULT_BLKSIZE;
-    int timeout = DEFAULT_TIMEOUT;
+    int timeout = DEFAULT_TIMEOUT - 2;
     int maxRetransmintCount = 3;
 
     char *host = NULL;
@@ -401,19 +404,16 @@ int main(int argc, char **argv) {
         openFile(mode, filepath, dest_file);
 
         do {
-            block++;
-
-            for (int i = 0; i < maxRetransmintCount; i++)
-            {
+            for (int i = 0; i < maxRetransmintCount; i++) {
                 if (handleTimeout(timeout)) {
-                    if (block == 1) {
-                        if (i == maxRetransmintCount - 1) printError("Max retansmission count reached", true);
-                        sendRqPacket(RRQ_OPCODE, filepath, mode, blksize, timeout);
-                    }
+                    if (block == 0) sendRqPacket(RRQ_OPCODE, filepath, mode, blksize, timeout);
                     else sendAckPacket(block);
-                } else break;
+                    if (i == maxRetransmintCount - 1) printError("Max retansmission count reached", true);
+                } else {
+                    break;
+                }
             }
-
+            block++;
             bytes_rx = receiveDataPacket(block, blksize);
 
             if (block == 1) {

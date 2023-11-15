@@ -21,7 +21,7 @@
 
 int server_socket = -1;
 int sockfd = -1;
-struct sockaddr_in server_addr, recv_addr;
+struct sockaddr_in server_addr, recv_addr, src_addr;
 socklen_t recv_len = sizeof(recv_addr);
 
 FILE *file;
@@ -210,12 +210,6 @@ void handleErrorPacket(char *packet) {
     char *errMsg = &packet[4];
     printError(errMsg, true);
 
-    struct sockaddr_in src_addr;
-    socklen_t src_len = sizeof(src_addr);
-    if (getsockname(sockfd, (struct sockaddr *)&src_addr, &src_len) < 0) {
-        perror("getsockname failed");
-        exit(EXIT_FAILURE);
-    }
     printErrorPacket(inet_ntoa(recv_addr.sin_addr), ntohs(recv_addr.sin_port), ntohs(src_addr.sin_port), ntohs(errorCode), errMsg);
 }
 
@@ -235,12 +229,6 @@ void sendErrorPacket(int errorCode, char *errMsg) {
     int bytes_tx = sendto(sockfd, error_buffer, error_packet_len, 0, (struct sockaddr *) &server_addr, sizeof(server_addr));
     if (bytes_tx < 0) printError("sendto not successful", true);
 
-    struct sockaddr_in src_addr;
-    socklen_t src_len = sizeof(src_addr);
-    if (getsockname(sockfd, (struct sockaddr *)&src_addr, &src_len) < 0) {
-        perror("getsockname failed");
-        exit(EXIT_FAILURE);
-    }
     printErrorPacket(inet_ntoa(src_addr.sin_addr), ntohs(src_addr.sin_port), ntohs(recv_addr.sin_port), ntohs(errorCode), errMsg);
 }
 
@@ -283,7 +271,6 @@ int sendDataPacket(uint16_t block, int blksize) {
     uint16_t opcode = DATA_OPCODE;
     
     char data_buffer[blksize + OPCODE_SIZE + BLOCK_NUMBER_SIZE];
-    printf("sizeof(data_buffer)=%ld", sizeof(data_buffer));
     bzero(data_buffer, sizeof(data_buffer));
 
     block = htons(block);
@@ -293,18 +280,10 @@ int sendDataPacket(uint16_t block, int blksize) {
     memcpy(&data_buffer[2], &block, 2);
 
     int bytes_read = fread(&data_buffer[4], sizeof(char), blksize, file);
-    printf("bytes_read:%d\n", bytes_read);
 
     int bytes_tx = sendto(sockfd, data_buffer, bytes_read + OPCODE_SIZE + BLOCK_NUMBER_SIZE, 0, (struct sockaddr *) &recv_addr, sizeof(recv_addr));
-    printf("bytes_tx:%d\n", bytes_tx);
     if (bytes_tx < 0) printError("sendto not successful", true);
 
-    struct sockaddr_in src_addr;
-    socklen_t src_len = sizeof(src_addr);
-    if (getsockname(sockfd, (struct sockaddr *)&src_addr, &src_len) < 0) {
-        perror("getsockname failed");
-        exit(EXIT_FAILURE);
-    }
     printDataPacket(inet_ntoa(src_addr.sin_addr), ntohs(src_addr.sin_port), ntohs(recv_addr.sin_port), ntohs(block));
 
     return bytes_tx;
@@ -337,12 +316,6 @@ int receiveDataPacket(uint16_t expected_block, int blksize) {
     memcpy(data, &packet_buffer[4], bytes_rx - 4);
     if (fprintf(file, "%s", data) < 0) printError("appending to file", true);
 
-    struct sockaddr_in src_addr;
-    socklen_t src_len = sizeof(src_addr);
-    if (getsockname(sockfd, (struct sockaddr *)&src_addr, &src_len) < 0) {
-        perror("getsockname failed");
-        exit(EXIT_FAILURE);
-    }
     printDataPacket(inet_ntoa(recv_addr.sin_addr), ntohs(recv_addr.sin_port), ntohs(src_addr.sin_port), ntohs(block));
 
 
@@ -363,12 +336,6 @@ int sendAckPacket(uint16_t block) {
     int bytes_tx = sendto(sockfd, ack_buffer, ACK_PACKET_SIZE, 0, (struct sockaddr *) &recv_addr, sizeof(recv_addr));
     if (bytes_tx < 0) printError("sendto not succesful", true);
 
-    struct sockaddr_in src_addr;
-    socklen_t src_len = sizeof(src_addr);
-    if (getsockname(sockfd, (struct sockaddr *)&src_addr, &src_len) < 0) {
-        perror("getsockname failed");
-        exit(EXIT_FAILURE);
-    }
     printAckPacket(inet_ntoa(src_addr.sin_addr), ntohs(src_addr.sin_port), ntohs(block), -1, -1);
 
     return bytes_tx;
@@ -393,12 +360,6 @@ int receiveAckPacket(uint16_t expected_block) {
     else if (opcode != ACK_OPCODE) printError("unexpected opcode while receive ack", true);
     if (block != expected_block) printError("unexpected block while receive ack", true);
 
-    struct sockaddr_in src_addr;
-    socklen_t src_len = sizeof(src_addr);
-    if (getsockname(sockfd, (struct sockaddr *)&src_addr, &src_len) < 0) {
-        perror("getsockname failed");
-        exit(EXIT_FAILURE);
-    }
     printAckPacket(inet_ntoa(recv_addr.sin_addr), ntohs(recv_addr.sin_port), block, -1, -1);
 
     return bytes_rx;
@@ -455,9 +416,16 @@ int main(int argc, char **argv) {
             closeUDPSocket(&sockfd);
             continue;
         } else {
+            
             closeUDPSocket(&server_socket);
 
             createUDPSocket(&sockfd);
+
+            socklen_t src_len = sizeof(src_addr);
+            if (getsockname(sockfd, (struct sockaddr *)&src_addr, &src_len) < 0) {
+                perror("getsockname failed");
+                exit(EXIT_FAILURE);
+            }
 
             uint16_t block;
 
@@ -477,14 +445,12 @@ int main(int argc, char **argv) {
                             bytes_tx = sendDataPacket(block, blksize);
                         } else break;
                     }
-                    handleTimeout(timeout);
                     receiveAckPacket(block);
 
                     block++;
                 } while (bytes_tx >= blksize + OPCODE_SIZE + BLOCK_NUMBER_SIZE);
                 
-            } else
-            {
+            } else {
                 openFile(root_dirpath, mode, filename, send_file);
 
                 block = 0;
@@ -492,13 +458,28 @@ int main(int argc, char **argv) {
 
                 sendAckPacket(block);
 
+                for (int i = 0; i < maxRetransmintCount; i++)
+                {
+                    if (handleTimeout(timeout)) {
+                        if (i == maxRetransmintCount - 1) printError("Max retansmission count reached", true);
+                        sendAckPacket(block);
+                    } else break;
+                }
+
                 block++;
 
                 do {
-                    handleTimeout(timeout);
                     bytes_rx = receiveDataPacket(block, blksize);
 
                     sendAckPacket(block);
+
+                    for (int i = 0; i < maxRetransmintCount; i++)
+                    {
+                        if (handleTimeout(timeout)) {
+                            if (i == maxRetransmintCount - 1) printError("Max retansmission count reached", true);
+                            sendAckPacket(block);
+                        } else break;
+                    }
 
                     block++;
                 } while (bytes_rx >= blksize + OPCODE_SIZE + BLOCK_NUMBER_SIZE);
