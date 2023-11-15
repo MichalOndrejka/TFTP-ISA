@@ -21,10 +21,8 @@
 #define DATA_OPCODE 3
 #define ACK_OPCODE 4
 #define ERROR_OPCODE 5
-
-// Global variables
-extern int blksize;
-extern int timeout;
+#define DEFAULT_BLKSIZE 512
+#define DEFAULT_TIMEOUT 5
 
 extern int server_socket;
 extern int sockfd;
@@ -35,7 +33,7 @@ extern socklen_t client_len;
 extern FILE *file;
 
 // Function declarations
-void printError(char *error);
+void printError(char *error, bool exit_failure);
 void printUsage(char **argv);
 void printPacket(char *packet, int size);
 void printInfo(char *opcode, uint16_t block, char *mode, char *filename, bool sender_is_server);
@@ -43,12 +41,12 @@ void handleArguments(int argc, char **argv, int *server_port, char **root_dirpat
 void closeUDPSocket(int *udp_socket);
 void createUDPSocket(int *udp_socket);
 void configureServerAddress(int server_port);
-void handleOptions(char *rq_packet, size_t bytes_rx);
-int receiveRqPacket(char *mode, char *filename, bool *send_file);
+void handleOptions(char *rq_packet, size_t bytes_rx, int *blksize, int *timeout);
+int receiveRqPacket(char *mode, char *filename, bool *send_file, int *blksize, int *timeout);
 void openFile(char *root_dirpath, char *mode, char *filename, bool send_file);
 void closeFile(void);
-int sendDataPacket(uint16_t block);
-int receiveDataPacket(uint16_t expected_block);
+int sendDataPacket(uint16_t block, int blksize);
+int receiveDataPacket(uint16_t expected_block, int blksize);
 int sendAckPacket(uint16_t block);
 int receiveAckPacket(uint16_t expected_block);
 

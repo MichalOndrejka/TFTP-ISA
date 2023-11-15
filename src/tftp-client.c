@@ -20,7 +20,7 @@
 #include "tftp-client.h"
 
 int sockfd;
-struct sockaddr_in server_addr, recv_addr;
+struct sockaddr_in server_addr, recv_addr, src_addr;
 socklen_t recv_len = sizeof(recv_addr);
 
 FILE *file = NULL;
@@ -40,8 +40,20 @@ void printUsage(char **argv) {
     exit(EXIT_FAILURE);
 }
 
-void printRqPacket(char *rq_opcode, char *src_ip, int src_port, char *filepath, char *mode, int blksize, int timeout) {
-    char *opts = "{$OPTS}";
+void printRqPacket(char *rq_opcode, char *src_ip, int src_port, char *filepath, char *mode, char *blksize_val, char *timeout_val) {
+    char opts[1024];
+    bzero(opts, sizeof(opts));
+
+    if (atoi(blksize_val) != DEFAULT_BLKSIZE) {
+        strcat(opts, "blksize=");
+        strcat(opts, blksize_val);
+        strcat(opts, " ");
+    }
+    if (atoi(timeout_val) != DEFAULT_TIMEOUT) {
+        strcat(opts, "timeout=");
+        strcat(opts, timeout_val);
+        strcat(opts, " ");
+    }
     fprintf(stderr, "%s %s:%d \"%s\" %s %s", rq_opcode, src_ip, src_port, filepath, mode, opts);
     fprintf(stderr, "\n");
     fflush(stderr);
@@ -73,7 +85,8 @@ void printErrorPacket(char *src_ip, int src_port, int dest_port, int code, char 
 void printPacket(char *packet, int size) {
     printf("Packet size: %d\n", size);
     for (int i = 0; i < size; i++) {
-        printf("%02x ", (unsigned char)packet[i]);
+        if (packet[i] <= 9) printf("%d ", packet[i]);
+        else (printf("%c ", packet[i]));
     }
     printf("\n");
 }
@@ -155,13 +168,7 @@ void handleErrorPacket(char *packet) {
     char *errMsg = &packet[4];
     printError(errMsg, true);
 
-    struct sockaddr_in client_addr;
-    socklen_t client_len = sizeof(client_addr);
-    if (getsockname(sockfd, (struct sockaddr *)&client_addr, &client_len) < 0) {
-        perror("getsockname failed");
-        exit(EXIT_FAILURE);
-    }
-    printErrorPacket(inet_ntoa(server_addr.sin_addr), ntohs(server_addr.sin_port), ntohs(client_addr.sin_port), ntohs(errorCode), errMsg);
+    printErrorPacket(inet_ntoa(server_addr.sin_addr), ntohs(server_addr.sin_port), ntohs(src_addr.sin_port), ntohs(errorCode), errMsg);
 }
 
 int sendErrorPacket(int errorCode, char *errMsg) {
@@ -180,13 +187,7 @@ int sendErrorPacket(int errorCode, char *errMsg) {
     int bytes_tx = sendto(sockfd, error_buffer, error_packet_len, 0, (struct sockaddr *) &server_addr, sizeof(server_addr));
     if (bytes_tx < 0) printError("sendto not successful", true);
 
-    struct sockaddr_in client_addr;
-    socklen_t client_len = sizeof(client_addr);
-    if (getsockname(sockfd, (struct sockaddr *)&client_addr, &client_len) < 0) {
-        perror("getsockname failed");
-        exit(EXIT_FAILURE);
-    }
-    printErrorPacket(inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port), ntohs(server_addr.sin_port), ntohs(errorCode), errMsg);
+    printErrorPacket(inet_ntoa(src_addr.sin_addr), ntohs(src_addr.sin_port), ntohs(server_addr.sin_port), ntohs(errorCode), errMsg);
 
     return bytes_tx;
 }
@@ -194,27 +195,50 @@ int sendErrorPacket(int errorCode, char *errMsg) {
 int sendRqPacket(uint16_t opcode, char *filename, char *mode, int blksize, int timeout) {
     opcode = htons(opcode);
     
-    int rq_packet_len = 2 + strlen(filename) + 1 + strlen(mode) + 1; // TO DO: EXTENSIONS
-    char rq_packet[rq_packet_len];
-    bzero(rq_packet, sizeof(rq_packet));
+    int opts_len = 0;
+    char blcksize_opt[] = "blcksize";
+    char timeout_opt[] = "timeout";
+    char blksize_val[64];
+    bzero(blksize_val, sizeof(blksize_val));
+    sprintf(blksize_val, "%d", blksize);
+    char timeout_val[64];
+    bzero(timeout_val, sizeof(timeout_val));
+    sprintf(timeout_val, "%d", timeout);
+    if (blksize != DEFAULT_BLKSIZE) opts_len += strlen(blcksize_opt) + 1 + strlen(blksize_val) + 1;
+    if (timeout != DEFAULT_TIMEOUT) opts_len += strlen(timeout_opt) + 1 + strlen(timeout_val) + 1;
 
-    memcpy(&rq_packet[0], &opcode, 2);
-    memcpy(&rq_packet[2], filename, strlen(filename));
-    memcpy(&rq_packet[2 + strlen(filename) + 1], mode, strlen(mode));
+    int packet_buffer_len = 2 + strlen(filename) + 1 + strlen(mode) + 1 + opts_len; // TO DO: EXTENSIONS
+    char packet_buffer[packet_buffer_len];
+    bzero(packet_buffer, sizeof(packet_buffer));
 
-    int bytes_tx = sendto(sockfd, rq_packet, rq_packet_len, 0, (struct sockaddr *) &server_addr, sizeof(server_addr));
+    int curr_byte = 0;
+    memcpy(&packet_buffer[curr_byte], &opcode, 2);
+    curr_byte += 2;
+    memcpy(&packet_buffer[curr_byte], filename, strlen(filename));
+    curr_byte += strlen(filename) + 1;
+    memcpy(&packet_buffer[curr_byte], mode, strlen(mode));
+    curr_byte += strlen(mode) + 1;
+
+    if (blksize != DEFAULT_BLKSIZE) {
+        memcpy(&packet_buffer[curr_byte], &blcksize_opt, strlen(blcksize_opt));
+        curr_byte += strlen(blcksize_opt) + 1;
+        memcpy(&packet_buffer[curr_byte], &blksize_val, strlen(blksize_val));
+        curr_byte += strlen(blksize_val) + 1;
+    }
+    if (timeout != DEFAULT_TIMEOUT) {
+        memcpy(&packet_buffer[curr_byte], &timeout_opt, sizeof(timeout_opt));
+        curr_byte += strlen(timeout_opt) + 1;
+        memcpy(&packet_buffer[curr_byte], &timeout_val, sizeof(timeout_val));
+        curr_byte += strlen(timeout_val) + 1;
+    }
+
+    int bytes_tx = sendto(sockfd, packet_buffer, sizeof(packet_buffer), 0, (struct sockaddr *) &server_addr, sizeof(server_addr));
     if (bytes_tx < 0) perror("RQ sendto");
 
-    struct sockaddr_in client_addr;
-    socklen_t client_len = sizeof(client_addr);
-    if (getsockname(sockfd, (struct sockaddr *)&client_addr, &client_len) < 0) {
-        perror("getsockname failed");
-        exit(EXIT_FAILURE);
-    }
     if (ntohs(opcode) == RRQ_OPCODE) {
-        printRqPacket("RRQ", inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port), filename, mode, blksize, timeout);
+        printRqPacket("RRQ", inet_ntoa(src_addr.sin_addr), ntohs(src_addr.sin_port), filename, mode, blksize_val, timeout_val);
     } else if (ntohs(opcode) == WRQ_OPCODE) {
-        printRqPacket("WRQ", inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port), filename, mode, blksize, timeout);
+        printRqPacket("WRQ", inet_ntoa(src_addr.sin_addr), ntohs(src_addr.sin_port), filename, mode, blksize_val, timeout_val);
     }
 
     return bytes_tx;
@@ -232,27 +256,24 @@ int sendDataPacket(uint16_t block, uint16_t blksize, bool is_retransmit) {
     memcpy(&packet_buffer[0], &opcode, 2);
     memcpy(&packet_buffer[2], &block, 2);
 
-    if (!is_retransmit) bytes_read = fread(&packet_buffer[4], 1, DATA_PACKET_SIZE - 4, file);
+    if (!is_retransmit) {
+        if (file == stdin) bytes_read = read(STDIN_FILENO, &packet_buffer[4], DATA_PACKET_SIZE - 4);
+        else bytes_read = fread(&packet_buffer[4], 1, DATA_PACKET_SIZE - 4, file);
+    } 
 
     int bytes_tx = sendto(sockfd, packet_buffer, bytes_read + 4, 0, (struct sockaddr *) &server_addr, sizeof(server_addr));
     if (bytes_tx < 0) printError("sendto not successful", true);
 
-    struct sockaddr_in client_addr;
-    socklen_t client_len = sizeof(client_addr);
-    if (getsockname(sockfd, (struct sockaddr *)&client_addr, &client_len) < 0) {
-        perror("getsockname failed");
-        exit(EXIT_FAILURE);
-    }
-    printDataPacket(inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port), ntohs(server_addr.sin_port), ntohs(block));
+    printDataPacket(inet_ntoa(src_addr.sin_addr), ntohs(src_addr.sin_port), ntohs(server_addr.sin_port), ntohs(block));
 
     return bytes_tx;
 }
 
 int receiveDataPacket(uint16_t expected_block, uint16_t blksize) {
-    char packet_buffer[DATA_PACKET_SIZE];
+    char packet_buffer[blksize + OPCODE_SIZE + BLOCK_NUMBER_SIZE];
     bzero(packet_buffer, sizeof(packet_buffer));
     
-    int bytes_rx = recvfrom(sockfd, packet_buffer, DATA_PACKET_SIZE, 0, (struct sockaddr *) &recv_addr, &recv_len);
+    int bytes_rx = recvfrom(sockfd, packet_buffer, sizeof(packet_buffer), 0, (struct sockaddr *) &recv_addr, &recv_len);
     if (bytes_rx < 0) printError("recvfrom not succesful", true);    
     if (bytes_rx < 4) printError("too little bytes in receive data packet", true);
 
@@ -270,18 +291,12 @@ int receiveDataPacket(uint16_t expected_block, uint16_t blksize) {
 
     if (block != expected_block) printError("unexpected block while receiving data", true);
 
-    char data[DATA_PACKET_SIZE - OPCODE_SIZE - BLOCK_NUMBER_SIZE + 1];
+    char data[blksize + 1];
     bzero(data, sizeof(data));
     memcpy(data, &packet_buffer[4], bytes_rx - 4);
     if (fprintf(file, "%s", data) < 0) printError("appending to file", true);
 
-    struct sockaddr_in client_addr;
-    socklen_t client_len = sizeof(client_addr);
-    if (getsockname(sockfd, (struct sockaddr *)&client_addr, &client_len) < 0) {
-        perror("getsockname failed");
-        exit(EXIT_FAILURE);
-    }
-    printDataPacket(inet_ntoa(recv_addr.sin_addr), ntohs(recv_addr.sin_port), ntohs(client_addr.sin_port), block);
+    printDataPacket(inet_ntoa(recv_addr.sin_addr), ntohs(recv_addr.sin_port), ntohs(src_addr.sin_port), block);
 
     return bytes_rx;
 }
@@ -301,13 +316,7 @@ int sendAckPacket(uint16_t block) {
     int bytes_tx = sendto(sockfd, packet_buffer, ACK_PACKET_SIZE, 0, (struct sockaddr *) &server_addr, sizeof(server_addr));
     if (bytes_tx < 0) printError("sendto not succesful", true);
 
-    struct sockaddr_in client_addr;
-    socklen_t client_len = sizeof(client_addr);
-    if (getsockname(sockfd, (struct sockaddr *)&client_addr, &client_len) < 0) {
-        perror("getsockname failed");
-        exit(EXIT_FAILURE);
-    }
-    printAckPacket(inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port), ntohs(block), -1, -1);
+    printAckPacket(inet_ntoa(src_addr.sin_addr), ntohs(src_addr.sin_port), ntohs(block), -1, -1);
 
     return bytes_tx;
 }
@@ -332,12 +341,6 @@ int receiveAckPacket(uint16_t expected_block) {
     else if (opcode != ACK_OPCODE) printError("unexpected opcod while receiving ack", true);
     if (block != expected_block) printError("unexpected block while receiving ack", true);
 
-    struct sockaddr_in client_addr;
-    socklen_t client_len = sizeof(client_addr);
-    if (getsockname(sockfd, (struct sockaddr *)&client_addr, &client_len) < 0) {
-        perror("getsockname failed");
-        exit(EXIT_FAILURE);
-    }
     printAckPacket(inet_ntoa(server_addr.sin_addr), ntohs(server_addr.sin_port), ntohs(expected_block), -1, -1);
 
     return bytes_rx;
@@ -381,6 +384,12 @@ int main(int argc, char **argv) {
 
     configureServerAddress(host, server_port);
 
+    socklen_t src_len = sizeof(src_addr);
+    if (getsockname(sockfd, (struct sockaddr *)&src_addr, &src_len) < 0) {
+        perror("getsockname failed");
+        exit(EXIT_FAILURE);
+    }
+
     uint16_t block;
 
     if (filepath) {
@@ -413,7 +422,7 @@ int main(int argc, char **argv) {
             }
 
             sendAckPacket(block);
-        } while(bytes_rx >= DATA_PACKET_SIZE);
+        } while(bytes_rx >= blksize + OPCODE_SIZE + BLOCK_NUMBER_SIZE);
 
     } else {
         block = 0;
@@ -449,7 +458,7 @@ int main(int argc, char **argv) {
             receiveAckPacket(block);
 
             block++;    
-        } while(bytes_tx >= DATA_PACKET_SIZE);
+        } while(bytes_tx >= blksize + OPCODE_SIZE + BLOCK_NUMBER_SIZE);
     }
 
     closeUDPSocket();
