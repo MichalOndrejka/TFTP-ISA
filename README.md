@@ -17,7 +17,7 @@ server: ./tftp-server -p 5000 -f server/
 
 ## Upload
 
-client: ./tftp-client -h 127.0.0.1 -p 5000 -t file_upload.txt
+client: ./tftp-client -h 127.0.0.1 -p 5000 -t file_upload.txt < client/file.txt
 server: ./tftp-server -p 5000 -f server/
 
 # List of submitted files

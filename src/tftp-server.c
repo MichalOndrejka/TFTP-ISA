@@ -32,7 +32,7 @@ void printError(char *error, bool exit_failure) {
     if (exit_failure) {
         closeUDPSocket(&server_socket);
         closeUDPSocket(&sockfd);
-        fclose(file);
+        if (file) fclose(file);
         exit(EXIT_FAILURE);
     }
 }
@@ -93,7 +93,8 @@ void printErrorPacket(char *src_ip, int src_port, int dest_port, int code, char 
 void printPacket(char *packet, int size) {
     printf("Packet size: %d\n", size);
     for (int i = 0; i < size; i++) {
-        printf("%02x ", (unsigned char)packet[i]);
+        if (packet[i] <= 9) printf("%d ", packet[i]);
+        else (printf("%c ", packet[i]));
     }
     printf("\n");
 }
@@ -165,7 +166,7 @@ void openFile(char *root_dirpath, char *mode, char *filename, bool send_file) {
 }
 
 void handleOptions(char *rq_packet, size_t bytes_rx, int *blksize, int *timeout) {
-    char blcksize_opt[] = "blcksize";
+    char blcksize_opt[] = "blksize";
     int min_blcksize = 8;
     int max_blcksize = 65464;
 
@@ -233,7 +234,7 @@ void sendErrorPacket(int errorCode, char *errMsg) {
 }
 
 int receiveRqPacket(char *mode, char *filename, bool *send_file, int *blksize, int *timeout) {
-    char packet_buffer[DATA_PACKET_SIZE];
+    char packet_buffer[DEFAULT_BLKSIZE];
     bzero(packet_buffer, sizeof(packet_buffer));
 
     int bytes_rx = recvfrom(server_socket, packet_buffer, sizeof(packet_buffer), 0, (struct sockaddr *) &recv_addr, &recv_len);
@@ -316,7 +317,7 @@ int receiveDataPacket(uint16_t expected_block, int blksize) {
     memcpy(data, &packet_buffer[4], bytes_rx - 4);
     if (fprintf(file, "%s", data) < 0) printError("appending to file", true);
 
-    printDataPacket(inet_ntoa(recv_addr.sin_addr), ntohs(recv_addr.sin_port), ntohs(src_addr.sin_port), ntohs(block));
+    printDataPacket(inet_ntoa(recv_addr.sin_addr), ntohs(recv_addr.sin_port), ntohs(src_addr.sin_port), block);
 
 
     return bytes_rx;
@@ -458,21 +459,7 @@ int main(int argc, char **argv) {
 
                 sendAckPacket(block);
 
-                for (int i = 0; i < maxRetransmintCount; i++)
-                {
-                    if (handleTimeout(timeout)) {
-                        if (i == maxRetransmintCount - 1) printError("Max retansmission count reached", true);
-                        sendAckPacket(block);
-                    } else break;
-                }
-
-                block++;
-
                 do {
-                    bytes_rx = receiveDataPacket(block, blksize);
-
-                    sendAckPacket(block);
-
                     for (int i = 0; i < maxRetransmintCount; i++)
                     {
                         if (handleTimeout(timeout)) {
@@ -482,10 +469,15 @@ int main(int argc, char **argv) {
                     }
 
                     block++;
+
+                    bytes_rx = receiveDataPacket(block, blksize);
+
+                    sendAckPacket(block);
+
                 } while (bytes_rx >= blksize + OPCODE_SIZE + BLOCK_NUMBER_SIZE);
             }
 
-            fclose(file);
+            if (file) fclose(file);
 
             closeUDPSocket(&sockfd);
             break;

@@ -43,7 +43,7 @@ void printPacket(char *packet, int size);
 int sendRqPacket(uint16_t opcode, char *filename, char *mode, int blksize, int timeout);
 void openFile(char *mode, char *filepath, char *dest_file);
 void closeFile(void);
-int sendDataPacket(uint16_t block, uint16_t blksize, bool is_retransmit);
+int sendDataPacket(uint16_t block, uint16_t blksize, bool is_retransmit, char *stdin_data, int stdin_data_index);
 int receiveDataPacket(uint16_t expected_block, uint16_t blksize);
 int sendAckPacket(uint16_t block);
 int receiveAckPacket(uint16_t expected_block);

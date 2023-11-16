@@ -155,9 +155,6 @@ void openFile(char *mode, char *filepath, char *dest_file) {
             file = fopen(dest_file, "ab");
         }
         if (file == NULL) printError("opening file for append", true);
-    } else {
-        file = stdin;
-        if (file == NULL) printError("opening file for read", true);
     }
 }
 
@@ -207,7 +204,7 @@ int sendRqPacket(uint16_t opcode, char *filename, char *mode, int blksize, int t
     if (blksize != DEFAULT_BLKSIZE) opts_len += strlen(blksize_opt) + 1 + strlen(blksize_val) + 1;
     if (timeout != DEFAULT_TIMEOUT) opts_len += strlen(timeout_opt) + 1 + strlen(timeout_val) + 1;
 
-    int packet_buffer_len = 2 + strlen(filename) + 1 + strlen(mode) + 1 + opts_len; // TO DO: EXTENSIONS
+    int packet_buffer_len = 2 + strlen(filename) + 1 + strlen(mode) + 1 + opts_len;
     char packet_buffer[packet_buffer_len];
     bzero(packet_buffer, sizeof(packet_buffer));
 
@@ -224,12 +221,11 @@ int sendRqPacket(uint16_t opcode, char *filename, char *mode, int blksize, int t
         curr_byte += strlen(blksize_opt) + 1;
         memcpy(&packet_buffer[curr_byte], &blksize_val, strlen(blksize_val));
         curr_byte += strlen(blksize_val) + 1;
-        printf("%d\n", opcode);
     }
     if (timeout != DEFAULT_TIMEOUT) {
         memcpy(&packet_buffer[curr_byte], &timeout_opt, strlen(timeout_opt));
         curr_byte += strlen(timeout_opt) + 1;
-        memcpy(&packet_buffer[curr_byte], &timeout_val, strlen(timeout_val)); // tu
+        memcpy(&packet_buffer[curr_byte], &timeout_val, strlen(timeout_val));
         curr_byte += strlen(timeout_val) + 1;
     }
 
@@ -245,7 +241,7 @@ int sendRqPacket(uint16_t opcode, char *filename, char *mode, int blksize, int t
     return bytes_tx;
 }
 
-int sendDataPacket(uint16_t block, uint16_t blksize, bool is_retransmit) {
+int sendDataPacket(uint16_t block, uint16_t blksize, bool is_retransmit, char *stdin_data, int stdin_data_index) {
     uint16_t opcode = DATA_OPCODE;
 
     opcode = htons(opcode);
@@ -256,13 +252,9 @@ int sendDataPacket(uint16_t block, uint16_t blksize, bool is_retransmit) {
     memcpy(&packet_buffer[0], &opcode, 2);
     memcpy(&packet_buffer[2], &block, 2);
 
-    if (is_retransmit) {
-        if (fseek(file, -blksize, SEEK_CUR) != 0) {
-            printError("fseek failed", true);
-        }
-    }
-
-    int bytes_read = fread(&packet_buffer[4], sizeof(char), blksize, file);
+    int bytes_read = strlen(&stdin_data[stdin_data_index]);
+    if (bytes_read > blksize) bytes_read = blksize;
+    memcpy(&packet_buffer[4], &stdin_data[stdin_data_index], bytes_read);
 
     int bytes_tx = sendto(sockfd, packet_buffer, bytes_read + OPCODE_SIZE + BLOCK_NUMBER_SIZE, 0, (struct sockaddr *) &server_addr, sizeof(server_addr));
     if (bytes_tx < 0) printError("sendto not successful", true);
@@ -344,7 +336,7 @@ int receiveAckPacket(uint16_t expected_block) {
     else if (opcode != ACK_OPCODE) printError("unexpected opcod while receiving ack", true);
     if (block != expected_block) printError("unexpected block while receiving ack", true);
 
-    printAckPacket(inet_ntoa(server_addr.sin_addr), ntohs(server_addr.sin_port), ntohs(expected_block), -1, -1);
+    printAckPacket(inet_ntoa(server_addr.sin_addr), ntohs(server_addr.sin_port), expected_block, -1, -1);
 
     return bytes_rx;
 }
@@ -372,8 +364,8 @@ int handleTimeout(int timeout) {
 
 int main(int argc, char **argv) {
     char mode[] = "netascii";
-    int blksize = DEFAULT_BLKSIZE;
-    int timeout = DEFAULT_TIMEOUT - 2;
+    int blksize = DEFAULT_BLKSIZE + 20;
+    int timeout = DEFAULT_TIMEOUT;
     int maxRetransmintCount = 3;
 
     char *host = NULL;
@@ -424,9 +416,34 @@ int main(int argc, char **argv) {
             sendAckPacket(block);
         } while(bytes_rx >= blksize + OPCODE_SIZE + BLOCK_NUMBER_SIZE);
 
+        fclose(file);
+
     } else {
         block = 0;
         int bytes_tx = -1;
+
+        int index = 0;
+        int ch;
+        size_t stdin_data_size = 1024;
+        char *stdin_data = (char *)malloc(stdin_data_size * sizeof(char));
+
+        if (stdin_data == NULL) {
+            printError("Memory allocation error", 1);
+        }
+
+        while ((ch = getchar()) != EOF) {
+            if (index == stdin_data_size) {
+                stdin_data_size *= 2;
+                stdin_data = (char *)realloc(stdin_data, stdin_data_size * sizeof(char));
+
+                if (stdin_data == NULL) {
+                    printError("Memory reallocation error", 1);
+                }
+            }
+
+            stdin_data[index++] = (char)ch;
+        }
+        stdin_data[index] = '\0';
 
         sendRqPacket(WRQ_OPCODE, dest_file, mode, blksize, timeout);
 
@@ -440,29 +457,31 @@ int main(int argc, char **argv) {
 
         receiveAckPacket(block);
 
+        block++;
+
         server_port = ntohs(recv_addr.sin_port);
         configureServerAddress(host, server_port);
 
-        openFile(mode, filepath, dest_file);
-
         do {
-            bytes_tx = sendDataPacket(block, blksize, false);
+            bytes_tx = sendDataPacket(block, blksize, false, stdin_data, (block-1) * blksize);
 
             for (int i = 0; i < maxRetransmintCount; i++)
             {
                 if (handleTimeout(timeout)) {
                     if (i == maxRetransmintCount - 1) printError("Max retansmission count reached", true);
-                    bytes_tx = sendDataPacket(block, blksize, true);
+                    bytes_tx = sendDataPacket(block, blksize, true, stdin_data, (block-1) * blksize);
                 } else break;
             }
+
             receiveAckPacket(block);
 
-            block++;    
+            block++;
         } while(bytes_tx >= blksize + OPCODE_SIZE + BLOCK_NUMBER_SIZE);
+
+        free(stdin_data);
     }
 
     closeUDPSocket();
-    fclose(file);
 
     return 0;
 }
