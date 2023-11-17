@@ -414,7 +414,6 @@ int main(int argc, char **argv) {
 
     while(true) {
         receiveRqPacket(mode, filename, &send_file, &blksize, &timeout);
-        while (true);
         
         // Create a child proccess to handle the request, the main porccess will listen for more requests 
         pid_t pid = fork();

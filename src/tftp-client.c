@@ -365,7 +365,7 @@ int handleTimeout(int timeout) {
 int main(int argc, char **argv) {
     // Neccessary variables
     char mode[] = "netascii";
-    int blksize = DEFAULT_BLKSIZE + 20;
+    int blksize = DEFAULT_BLKSIZE;
     int timeout = DEFAULT_TIMEOUT;
     int maxRetransmintCount = 3;
 
