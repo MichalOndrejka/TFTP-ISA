@@ -363,11 +363,13 @@ int handleTimeout(int timeout) {
 }
 
 int main(int argc, char **argv) {
+    // Neccessary variables
     char mode[] = "netascii";
     int blksize = DEFAULT_BLKSIZE + 20;
     int timeout = DEFAULT_TIMEOUT;
     int maxRetransmintCount = 3;
 
+    // Variables for command line arguments
     char *host = NULL;
     int server_port = TFTP_SERVER_PORT;
     char *filepath = NULL;
@@ -379,58 +381,61 @@ int main(int argc, char **argv) {
 
     configureServerAddress(host, server_port);
 
+    // Get information about source ip and source port
     socklen_t src_len = sizeof(src_addr);
     if (getsockname(sockfd, (struct sockaddr *)&src_addr, &src_len) < 0) {
         perror("getsockname failed");
         exit(EXIT_FAILURE);
     }
 
+    // Number of currently processed block
     uint16_t block;
 
     if (filepath) {
         block = 0;
-        int bytes_rx = -1;
+        int bytes_rx = -1; // bytes received
 
         sendRqPacket(RRQ_OPCODE, filepath, mode, blksize, timeout);
 
         openFile(mode, filepath, dest_file);
 
         do {
-            for (int i = 0; i < maxRetransmintCount; i++) {
+            for (int i = 0; i <= maxRetransmintCount; i++) {
                 if (handleTimeout(timeout)) {
+                    if (i == maxRetransmintCount) printError("max retansmission count reached", true);
+                    // If the block is zero last attempt to send was to send rq packet, so client has to regransmit rq packet
                     if (block == 0) sendRqPacket(RRQ_OPCODE, filepath, mode, blksize, timeout);
                     else sendAckPacket(block);
-                    if (i == maxRetransmintCount - 1) printError("Max retansmission count reached", true);
                 } else {
                     break;
                 }
             }
+
             block++;
             bytes_rx = receiveDataPacket(block, blksize);
 
+            // If the client received first data packet update destination port
             if (block == 1) {
                 server_port = ntohs(recv_addr.sin_port);
                 configureServerAddress(host, server_port);   
             }
 
             sendAckPacket(block);
+            // While not received less data then max in data packet
         } while(bytes_rx >= blksize + OPCODE_SIZE + BLOCK_NUMBER_SIZE);
 
         fclose(file);
 
     } else {
         block = 0;
-        int bytes_tx = -1;
+        int bytes_tx = -1; // bytes sent
 
+        // Load data from stdin to memory
         int index = 0;
         int ch;
         size_t stdin_data_size = 1024;
         char *stdin_data = (char *)malloc(stdin_data_size * sizeof(char));
-
-        if (stdin_data == NULL) {
-            printError("Memory allocation error", 1);
-        }
-
+        if (stdin_data == NULL) printError("Memory allocation error", 1);
         while ((ch = getchar()) != EOF) {
             if (index == stdin_data_size) {
                 stdin_data_size *= 2;
@@ -440,17 +445,16 @@ int main(int argc, char **argv) {
                     printError("Memory reallocation error", 1);
                 }
             }
-
             stdin_data[index++] = (char)ch;
         }
         stdin_data[index] = '\0';
 
         sendRqPacket(WRQ_OPCODE, dest_file, mode, blksize, timeout);
 
-        for (int i = 0; i < maxRetransmintCount; i++)
+        for (int i = 0; i <= maxRetransmintCount; i++)
         {
+            if (i == maxRetransmintCount) printError("max retansmission count reached", true);
             if (handleTimeout(timeout)) {
-                if (i == maxRetransmintCount - 1) printError("Max retansmission count reached", true);
                 sendRqPacket(WRQ_OPCODE, dest_file, mode, blksize, timeout);
             } else break;
         }
@@ -459,16 +463,17 @@ int main(int argc, char **argv) {
 
         block++;
 
+        // Update destination port with src port of ACK with block number 0
         server_port = ntohs(recv_addr.sin_port);
         configureServerAddress(host, server_port);
 
         do {
             bytes_tx = sendDataPacket(block, blksize, false, stdin_data, (block-1) * blksize);
 
-            for (int i = 0; i < maxRetransmintCount; i++)
+            for (int i = 0; i <= maxRetransmintCount; i++)
             {
+                if (i == maxRetransmintCount) printError("max retansmission count reached", true);
                 if (handleTimeout(timeout)) {
-                    if (i == maxRetransmintCount - 1) printError("Max retansmission count reached", true);
                     bytes_tx = sendDataPacket(block, blksize, true, stdin_data, (block-1) * blksize);
                 } else break;
             }
@@ -476,9 +481,11 @@ int main(int argc, char **argv) {
             receiveAckPacket(block);
 
             block++;
+            // While not sent less data then max in data packet
         } while(bytes_tx >= blksize + OPCODE_SIZE + BLOCK_NUMBER_SIZE);
 
-        free(stdin_data);
+        // Free allocated memory for stdin data
+        if (stdin_data) free(stdin_data);
     }
 
     closeUDPSocket();

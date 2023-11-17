@@ -388,16 +388,18 @@ int handleTimeout(int timeout) {
 }
 
 int main(int argc, char **argv) {
+    // Neccessary variables
     char mode[128] = "";
     int blksize = DEFAULT_BLKSIZE;
     int timeout = DEFAULT_TIMEOUT;
     int maxRetransmintCount = 3;
 
+    // Variables for command line arguments
     int server_port = TFTP_SERVER_PORT;
     char *root_dirpath = NULL;
 
-    bool send_file;
-    char filename[1024];
+    bool send_file; // Indicates if server is sending file
+    char filename[1024]; // Allocation for storing name of local file
 
     handleArguments(argc, argv, &server_port, &root_dirpath);
 
@@ -405,13 +407,16 @@ int main(int argc, char **argv) {
 
     configureServerAddress(server_port);
 
+    // Bind server_socket to listen on specific port
     if (bind(server_socket, (struct sockaddr *) &server_addr, sizeof(server_addr)) < 0) {
         printError("Bind error", true);
     }
 
     while(true) {
         receiveRqPacket(mode, filename, &send_file, &blksize, &timeout);
-
+        while (true);
+        
+        // Create a child proccess to handle the request, the main porccess will listen for more requests 
         pid_t pid = fork();
         if (pid != 0) {
             closeUDPSocket(&sockfd);
@@ -422,48 +427,51 @@ int main(int argc, char **argv) {
 
             createUDPSocket(&sockfd);
 
+            // Get information about source ip and source port
             socklen_t src_len = sizeof(src_addr);
             if (getsockname(sockfd, (struct sockaddr *)&src_addr, &src_len) < 0) {
                 perror("getsockname failed");
                 exit(EXIT_FAILURE);
             }
 
+            // Number of currently processed block
             uint16_t block;
 
             if (send_file) {
                 openFile(root_dirpath, mode, filename, send_file);
 
-                int bytes_tx;
+                int bytes_tx; // bytes sent
                 block = 1;
 
                 do {
                     bytes_tx = sendDataPacket(block, blksize);
 
-                    for (int i = 0; i < maxRetransmintCount; i++)
+                    for (int i = 0; i <= maxRetransmintCount; i++)
                     {
+                        if (i == maxRetransmintCount) printError("Max retansmission count reached", true);
                         if (handleTimeout(timeout)) {
-                            if (i == maxRetransmintCount - 1) printError("Max retansmission count reached", true);
                             bytes_tx = sendDataPacket(block, blksize);
                         } else break;
                     }
                     receiveAckPacket(block);
 
                     block++;
+                    // While not sent less data then max in data packet
                 } while (bytes_tx >= blksize + OPCODE_SIZE + BLOCK_NUMBER_SIZE);
                 
             } else {
                 openFile(root_dirpath, mode, filename, send_file);
 
                 block = 0;
-                int bytes_rx;
+                int bytes_rx; // bytes received
 
                 sendAckPacket(block);
 
                 do {
-                    for (int i = 0; i < maxRetransmintCount; i++)
+                    for (int i = 0; i <= maxRetransmintCount; i++)
                     {
+                        if (i == maxRetransmintCount) printError("Max retansmission count reached", true);
                         if (handleTimeout(timeout)) {
-                            if (i == maxRetransmintCount - 1) printError("Max retansmission count reached", true);
                             sendAckPacket(block);
                         } else break;
                     }
@@ -473,7 +481,7 @@ int main(int argc, char **argv) {
                     bytes_rx = receiveDataPacket(block, blksize);
 
                     sendAckPacket(block);
-
+                // While not received less data then max in data packet
                 } while (bytes_rx >= blksize + OPCODE_SIZE + BLOCK_NUMBER_SIZE);
             }
 
