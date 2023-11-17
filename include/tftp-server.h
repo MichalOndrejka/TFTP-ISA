@@ -16,11 +16,13 @@
 #define ACK_PACKET_SIZE 4
 #define OPCODE_SIZE 2
 #define BLOCK_NUMBER_SIZE 2   
+#define EEROR_CODE_SIZE 2
 #define RRQ_OPCODE 1
 #define WRQ_OPCODE 2
 #define DATA_OPCODE 3
 #define ACK_OPCODE 4
 #define ERROR_OPCODE 5
+#define OACK_OPCODE 7
 #define DEFAULT_BLKSIZE 512
 #define DEFAULT_TIMEOUT 5
 

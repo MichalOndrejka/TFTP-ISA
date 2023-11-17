@@ -16,11 +16,13 @@
 #define ACK_PACKET_SIZE 4
 #define OPCODE_SIZE 2
 #define BLOCK_NUMBER_SIZE 2
+#define EEROR_CODE_SIZE 2
 #define RRQ_OPCODE 1
 #define WRQ_OPCODE 2
 #define DATA_OPCODE 3
 #define ACK_OPCODE 4
 #define ERROR_OPCODE 5
+#define OACK_OPCODE 7
 #define DEFAULT_BLKSIZE 512
 #define DEFAULT_TIMEOUT 5
 
@@ -40,7 +42,7 @@ void handleArguments(int argc, char **argv, char **host, int *server_port, char 
 void createUDPSocket(int *sockfd);
 void configureServerAddress(char *host, int server_port);
 void printPacket(char *packet, int size);
-int sendRqPacket(uint16_t opcode, char *filename, char *mode, int blksize, int timeout);
+int sendRqPacket(uint16_t opcode, char *filename, char *mode, int *blksize, int *timeout);
 void openFile(char *mode, char *filepath, char *dest_file);
 void closeFile(void);
 int sendDataPacket(uint16_t block, uint16_t blksize, bool is_retransmit, char *stdin_data, int stdin_data_index);
