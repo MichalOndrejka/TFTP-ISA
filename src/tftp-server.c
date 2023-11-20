@@ -5,7 +5,7 @@
  * **********************************************************************
  */
 
-#include "tftp-server.h"
+#include "../include/tftp-server.h"
 
 int server_socket = -1;
 int sockfd = -1;

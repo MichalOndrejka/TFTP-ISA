@@ -5,7 +5,7 @@
  * **********************************************************************
  */
 
-#include "tftp-client.h"
+#include "../include/tftp-client.h"
 
 int sockfd = -1;
 struct sockaddr_in server_addr, recv_addr, src_addr;
