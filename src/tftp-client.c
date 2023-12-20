@@ -5,21 +5,9 @@
  * **********************************************************************
  */
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <unistd.h>
-#include <sys/socket.h>
-#include <sys/time.h>
-#include <sys/types.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
-#include <netdb.h>
-#include <getopt.h>
-#include <stdbool.h>
 #include "tftp-client.h"
 
-int sockfd;
+int sockfd = -1;
 struct sockaddr_in server_addr, recv_addr, src_addr;
 socklen_t recv_len = sizeof(recv_addr);
 
@@ -116,10 +104,6 @@ void printPacket(char *packet, int size) {
 }
 
 void handleArguments(int argc, char **argv, char **host, int *server_port, char **filepath, char **dest_file) {
-    if (argc < 5 || argc > 9) {
-        printUsage(argv);
-    }
-
     char option;
     while ((option = getopt(argc, argv, "h:p:f:t:")) != -1) {
         switch (option) {
@@ -141,8 +125,8 @@ void handleArguments(int argc, char **argv, char **host, int *server_port, char 
         }
     }
 
-    if (host == NULL) printUsage(argv);
-    if (dest_file == NULL) printUsage(argv);
+    if (*host == NULL) printUsage(argv);
+    if (*dest_file == NULL) printUsage(argv);
 }
 
 void createUDPSocket(int *sockfd) {
@@ -169,20 +153,20 @@ void configureServerAddress(char *host, int server_port) {
 
 void openFile(char *mode, char *filepath, char *dest_file) {
     if (filepath) {
-        file = fopen(dest_file, "w");
+        file = fopen(dest_file, "wb");
         if (file == NULL) printError("creating file", true);
-        fclose(file);
-
-        if (!strcmp(mode, "netascii")) {
-            file = fopen(dest_file,"a");
-        } else if (!strcmp(mode, "octet")) {
-            file = fopen(dest_file, "ab");
-        }
-        if (file == NULL) printError("opening file for append", true);
     }
 }
 
-void receiveOackPacket(int *blksize, int *timeout) {
+/**
+ * @brief Receive OACK packet with blksize and timeout
+ *
+ * @param blksize get blksize if in options
+ * @param timeout get timeout if in options
+ * 
+ * @return bytes received
+ */
+int receiveOackPacket(int *blksize, int *timeout) {
     char packet_buffer[DEFAULT_BLKSIZE];
     bzero(packet_buffer, sizeof(packet_buffer));
 
@@ -226,8 +210,23 @@ void receiveOackPacket(int *blksize, int *timeout) {
 
     *blksize = blksize_val;
     *timeout = timeout_val;
+
+    printAckPacket(inet_ntoa(recv_addr.sin_addr), ntohs(recv_addr.sin_port), -1, *blksize, *timeout);
+
+    return bytes_rx;
 }
 
+/**
+ * @brief Send RQ packet, set opcode (RRQ/WRQ), set filename, set mode and append options if any
+ *
+ * @param opcode RRQ or WRQ opcode
+ * @param filename name of file
+ * @param mode mode to be set in rq packet
+ * @param blksize set blksize if any in options
+ * @param timeout set timeout if any in options
+ * 
+ * @return bytes sent
+ */
 int sendRqPacket(uint16_t opcode, char *filename, char *mode, int *blksize, int *timeout) {
     opcode = htons(opcode);
 
@@ -271,19 +270,15 @@ int sendRqPacket(uint16_t opcode, char *filename, char *mode, int *blksize, int 
     int bytes_tx = sendto(sockfd, packet_buffer, sizeof(packet_buffer), 0, (struct sockaddr *) &server_addr, sizeof(server_addr));
     if (bytes_tx < 0) printError("rq packet sendto failed", true);
 
-    if (opts_len > 0) receiveOackPacket(blksize, timeout);
-
-    if (ntohs(opcode) == RRQ_OPCODE) {
-        printRqPacket("RRQ", inet_ntoa(src_addr.sin_addr), ntohs(src_addr.sin_port), filename, mode, blksize_val, timeout_val);
-    } else if (ntohs(opcode) == WRQ_OPCODE) {
-        printRqPacket("WRQ", inet_ntoa(src_addr.sin_addr), ntohs(src_addr.sin_port), filename, mode, blksize_val, timeout_val);
-    }
-
-    if (opts_len > 0) printAckPacket(inet_ntoa(recv_addr.sin_addr), ntohs(recv_addr.sin_port), -1, *blksize, *timeout);
-
     return bytes_tx;
 }
 
+/**
+ * @brief Send error packet. Set opcode, error code and error message
+ *
+ * @param error_code error packet
+ * @param error_msg error message
+ */
 int sendErrorPacket(uint16_t error_code, char *error_msg) {
     uint16_t opcode = ERROR_OPCODE;
 
@@ -301,14 +296,17 @@ int sendErrorPacket(uint16_t error_code, char *error_msg) {
     int bytes_tx = sendto(sockfd, packet_buffer, packet_buffer_len, 0, (struct sockaddr *) &server_addr, sizeof(server_addr));
     if (bytes_tx < 0) printError("sendto not successful", true);
 
-    printErrorPacket(inet_ntoa(src_addr.sin_addr), ntohs(src_addr.sin_port), ntohs(server_addr.sin_port), ntohs(error_code), error_msg);
-
     if (error_code == 5) printError(error_msg, false);
     else printError(error_msg, true);
 
     return bytes_tx;
 }
 
+/**
+ * @brief Handler for error packet. If error code isn't 5 terminate process
+ *
+ * @param packet error packet
+ */
 void handleErrorPacket(char *packet) {
     uint16_t error_code;
     memcpy(&error_code, &packet[2], 2);
@@ -321,13 +319,23 @@ void handleErrorPacket(char *packet) {
     else printError(error_msg, true);
 }
 
-int sendDataPacket(uint16_t block, uint16_t blksize, bool is_retransmit, char *stdin_data, int stdin_data_index) {
+/**
+ * @brief Send DATA packet, set opcode, read blksize bytes of data and set it in packet
+ *
+ * @param block expected block number of data
+ * @param blksize size of payload data
+ * @param stdin_data string containing data from stdin
+ * @param stdin_data_index from what index in stdin_data should be sent blksize bytes of data
+ * 
+ * @return bytes sent
+ */
+int sendDataPacket(uint16_t block, uint16_t blksize, char *stdin_data, int stdin_data_index) {
     uint16_t opcode = DATA_OPCODE;
 
     opcode = htons(opcode);
     block = htons(block);
 
-    char packet_buffer[blksize + OPCODE_SIZE + BLOCK_NUMBER_SIZE];
+    char packet_buffer[OPCODE_SIZE + BLOCK_NUMBER_SIZE + blksize];
     bzero(packet_buffer, sizeof(packet_buffer));
     memcpy(&packet_buffer[0], &opcode, 2);
     memcpy(&packet_buffer[2], &block, 2);
@@ -339,11 +347,17 @@ int sendDataPacket(uint16_t block, uint16_t blksize, bool is_retransmit, char *s
     int bytes_tx = sendto(sockfd, packet_buffer, bytes_read + OPCODE_SIZE + BLOCK_NUMBER_SIZE, 0, (struct sockaddr *) &server_addr, sizeof(server_addr));
     if (bytes_tx < 0) printError("sendto not successful", true);
 
-    printDataPacket(inet_ntoa(src_addr.sin_addr), ntohs(src_addr.sin_port), ntohs(server_addr.sin_port), ntohs(block));
-
     return bytes_tx;
 }
 
+/**
+ * @brief Receive DATA packet, check opcode, receive blksize bytes of payload data and write it to file
+ *
+ * @param expected_block expected block number of data
+ * @param blksize size of payload data
+ * 
+ * @return bytes received
+ */
 int receiveDataPacket(uint16_t expected_block, uint16_t blksize) {
     char packet_buffer[blksize + OPCODE_SIZE + BLOCK_NUMBER_SIZE];
     bzero(packet_buffer, sizeof(packet_buffer));
@@ -376,6 +390,13 @@ int receiveDataPacket(uint16_t expected_block, uint16_t blksize) {
     return bytes_rx;
 }
 
+/**
+ * @brief Send ACK packet, set opcode and set block number with block param
+ *
+ * @param block block number to send the ack for
+ * 
+ * @return bytes sent
+ */
 int sendAckPacket(uint16_t block) {
     uint16_t opcode = ACK_OPCODE;
 
@@ -391,11 +412,16 @@ int sendAckPacket(uint16_t block) {
     int bytes_tx = sendto(sockfd, packet_buffer, ACK_PACKET_SIZE, 0, (struct sockaddr *) &server_addr, sizeof(server_addr));
     if (bytes_tx < 0) printError("ack packet sendto failed", true);
 
-    printAckPacket(inet_ntoa(src_addr.sin_addr), ntohs(src_addr.sin_port), ntohs(block), -1, -1);
-
     return bytes_tx;
 }
 
+/**
+ * @brief Receive ACK packet, chceck opcode and compare expected block number with received block number
+ *
+ * @param expected_block expected block number of ack
+ * 
+ * @return bytes received
+ */
 int receiveAckPacket(uint16_t expected_block) {
     char packet_buffer[ACK_PACKET_SIZE];
     bzero(packet_buffer, sizeof(packet_buffer));
@@ -417,11 +443,18 @@ int receiveAckPacket(uint16_t expected_block) {
     else if (opcode != ACK_OPCODE) sendErrorPacket(4, "Illegal TFTP operation, unexpected opcode");
     if (block != expected_block) sendErrorPacket(4, "Illegal TFTP operation, unexpected block");
 
-    printAckPacket(inet_ntoa(server_addr.sin_addr), ntohs(server_addr.sin_port), expected_block, -1, -1);
+    printAckPacket(inet_ntoa(recv_addr.sin_addr), ntohs(recv_addr.sin_port), expected_block, -1, -1);
 
     return bytes_rx;
 }
 
+/**
+ * @brief Waits for data to be available to receive
+ *
+ * @param timeout time to wait (s)
+ * 
+ * @return 1 if timed out, 0 if data are available to rece
+ */
 int handleTimeout(int timeout) {
     fd_set fds;
     struct timeval tv;
@@ -445,10 +478,10 @@ int handleTimeout(int timeout) {
 
 int main(int argc, char **argv) {
     // Neccessary variables
-    char mode[] = "netascii";
+    char mode[] = "octet";
     int blksize = DEFAULT_BLKSIZE;
     int timeout = DEFAULT_TIMEOUT;
-    int maxRetransmintCount = 3;
+    int maxRetransmitCount = 3;
 
     // Variables for command line arguments
     char *host = NULL;
@@ -463,6 +496,11 @@ int main(int argc, char **argv) {
     configureServerAddress(host, server_port);
 
     // Get information about source ip and source port
+    if (bind(sockfd, (struct sockaddr*)&src_addr, sizeof(src_addr)) < 0) {
+        printError("bind failed", true);
+    }
+
+    // Get information about the source IP and source port after the socket is bound
     socklen_t src_len = sizeof(src_addr);
     if (getsockname(sockfd, (struct sockaddr *)&src_addr, &src_len) < 0) {
         printError("getsockname failed", true);
@@ -479,12 +517,32 @@ int main(int argc, char **argv) {
 
         openFile(mode, filepath, dest_file);
 
-        do {
-            for (int i = 0; i <= maxRetransmintCount; i++) {
+        if (blksize != DEFAULT_BLKSIZE || timeout != DEFAULT_TIMEOUT) {
+            for (int i = 0; i <= maxRetransmitCount; i++)
+            {
+                if (i == maxRetransmitCount) printError("max retansmission count reached", true);
                 if (handleTimeout(timeout)) {
-                    if (i == maxRetransmintCount) printError("max retansmission count reached", true);
+                    sendRqPacket(RRQ_OPCODE, filepath, mode, &blksize, &timeout);
+                } else break;
+            }
+
+            receiveOackPacket(&blksize, &timeout);
+
+            server_port = ntohs(recv_addr.sin_port);
+            configureServerAddress(host, server_port);
+
+            sendAckPacket(block);
+        }
+
+        do {
+            for (int i = 0; i <= maxRetransmitCount; i++) {
+                if (handleTimeout(timeout)) {
+                    if (i == maxRetransmitCount) printError("max retansmission count reached", true);
                     // If the block is zero last attempt to send was to send rq packet, so client has to regransmit rq packet
-                    if (block == 0) sendRqPacket(RRQ_OPCODE, filepath, mode, &blksize, &timeout);
+                    if (block == 0) {
+                        if (blksize != DEFAULT_BLKSIZE || timeout != DEFAULT_TIMEOUT) sendAckPacket(block);
+                        else sendRqPacket(RRQ_OPCODE, filepath, mode, &blksize, &timeout);
+                    }
                     else sendAckPacket(block);
                 } else {
                     break;
@@ -492,6 +550,7 @@ int main(int argc, char **argv) {
             }
 
             block++;
+
             bytes_rx = receiveDataPacket(block, blksize);
 
             // If the client received first data packet update destination port
@@ -528,15 +587,16 @@ int main(int argc, char **argv) {
 
         sendRqPacket(WRQ_OPCODE, dest_file, mode, &blksize, &timeout);
 
-        for (int i = 0; i <= maxRetransmintCount; i++)
+        for (int i = 0; i <= maxRetransmitCount; i++)
         {
-            if (i == maxRetransmintCount) printError("max retansmission count reached", true);
+            if (i == maxRetransmitCount) printError("max retansmission count reached", true);
             if (handleTimeout(timeout)) {
                 sendRqPacket(WRQ_OPCODE, dest_file, mode, &blksize, &timeout);
             } else break;
         }
 
-        receiveAckPacket(block);
+        if (blksize != DEFAULT_BLKSIZE || timeout != DEFAULT_TIMEOUT) receiveOackPacket(&blksize, &timeout);
+        else receiveAckPacket(block);
 
         block++;
 
@@ -545,13 +605,13 @@ int main(int argc, char **argv) {
         configureServerAddress(host, server_port);
 
         do {
-            bytes_tx = sendDataPacket(block, blksize, false, stdin_data, (block-1) * blksize);
+            bytes_tx = sendDataPacket(block, blksize, stdin_data, (block-1) * blksize);
 
-            for (int i = 0; i <= maxRetransmintCount; i++)
+            for (int i = 0; i <= maxRetransmitCount; i++)
             {
-                if (i == maxRetransmintCount) printError("max retansmission count reached", true);
+                if (i == maxRetransmitCount) printError("max retansmission count reached", true);
                 if (handleTimeout(timeout)) {
-                    bytes_tx = sendDataPacket(block, blksize, true, stdin_data, (block-1) * blksize);
+                    bytes_tx = sendDataPacket(block, blksize, stdin_data, (block-1) * blksize);
                 } else break;
             }
 

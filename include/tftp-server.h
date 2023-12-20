@@ -9,47 +9,58 @@
 #define TFTP_SERVER_H
 
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <stdbool.h>
+#include <getopt.h>
+#include <unistd.h>
 #include <sys/socket.h>
+#include <sys/time.h>
+#include <arpa/inet.h>
+#include <netdb.h>
 
+#define DEFAULT_BLKSIZE 512
 #define TFTP_SERVER_PORT 69
-#define DATA_PACKET_SIZE 516
-#define ACK_PACKET_SIZE 4
-#define OPCODE_SIZE 2
-#define BLOCK_NUMBER_SIZE 2   
-#define EEROR_CODE_SIZE 2
+#define DEFAULT_TIMEOUT 5
+
 #define RRQ_OPCODE 1
 #define WRQ_OPCODE 2
 #define DATA_OPCODE 3
 #define ACK_OPCODE 4
 #define ERROR_OPCODE 5
-#define OACK_OPCODE 7
-#define DEFAULT_BLKSIZE 512
-#define DEFAULT_TIMEOUT 5
+#define OACK_OPCODE 6
 
-extern int server_socket;
-extern int sockfd;
-extern struct sockaddr_in server_addr, client_addr;
-extern socklen_t server_len;
-extern socklen_t client_len;
+#define OPCODE_SIZE 2
+#define BLOCK_NUMBER_SIZE 2
+#define EEROR_CODE_SIZE 2
+#define ACK_PACKET_SIZE 4
 
-extern FILE *file;
+#define MIN_BLKSIZE 8
+#define MAX_BLKSIZE 65464
+#define MIN_TIMEOUT 1
+#define MAX_TIMEOUT 255
 
-// Function declarations
 void printError(char *error, bool exit_failure);
 void printUsage(char **argv);
-void printPacket(char *packet, int size);
-void printInfo(char *opcode, uint16_t block, char *mode, char *filename, bool sender_is_server);
+void printRqPacket(char *rq_opcode, char *src_ip, int src_port, char *filepath, char *mode, int blksize, int timeout);
+void printAckPacket(char *scr_ip, int src_port, int block_id, char *blksize_val, char *timeout_val);
+void printDataPacket(char *src_ip, int src_port, int dest_port, int block_id);
+void printErrorPacket(char *src_ip, int src_port, int dest_port, int code, char *message);
+
 void handleArguments(int argc, char **argv, int *server_port, char **root_dirpath);
-void closeUDPSocket(int *udp_socket);
-void createUDPSocket(int *udp_socket);
+void createUDPSocket(int *sockfd);
+void closeUDPSocket(int *sockfd);
 void configureServerAddress(int server_port);
+void sendErrorPacket(uint16_t error_code, char *error_msg);
+void handleErrorPacket(char *packet);
+void openFile(char *root_dirpath, char *filename, bool send_file);
+int sendOackPacket(int blksize, int timeout);
 void handleOptions(char *rq_packet, size_t bytes_rx, int *blksize, int *timeout);
 int receiveRqPacket(char *mode, char *filename, bool *send_file, int *blksize, int *timeout);
-void openFile(char *root_dirpath, char *mode, char *filename, bool send_file);
-void closeFile(void);
-int sendDataPacket(uint16_t block, int blksize);
+int sendDataPacket(uint16_t block, int blksize, bool is_retransmit);
 int receiveDataPacket(uint16_t expected_block, int blksize);
 int sendAckPacket(uint16_t block);
 int receiveAckPacket(uint16_t expected_block);
+int handleTimeout(int timeout);
 
-#endif
+#endif /* TFTP_SERVER_H */
