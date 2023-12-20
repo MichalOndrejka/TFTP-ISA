@@ -51,7 +51,7 @@ void handleArguments(int argc, char **argv, int *server_port, char **root_dirpat
 void createUDPSocket(int *sockfd);
 void closeUDPSocket(int *sockfd);
 void configureServerAddress(int server_port);
-void sendErrorPacket(uint16_t error_code, char *error_msg);
+void sendErrorPacket(uint16_t error_code, char *error_msg, bool exit_failure);
 void handleErrorPacket(char *packet);
 void openFile(char *root_dirpath, char *filename, bool send_file);
 int sendOackPacket(int blksize, int timeout);

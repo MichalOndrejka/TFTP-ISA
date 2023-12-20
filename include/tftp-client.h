@@ -52,7 +52,7 @@ void handleArguments(int argc, char **argv, char **host, int *server_port, char 
 void createUDPSocket(int *sockfd);
 void closeUDPSocket();
 void configureServerAddress(char *host, int server_port);
-void openFile(char *mode, char *filepath, char *dest_file);
+void openFile(char *dest_file);
 int receiveOackPacket(int *blksize, int *timeout);
 int sendRqPacket(uint16_t opcode, char *filename, char *mode, int *blksize, int *timeout);
 int sendErrorPacket(uint16_t error_code, char *error_msg);

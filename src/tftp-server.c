@@ -14,24 +14,23 @@ socklen_t recv_len = sizeof(recv_addr);
 
 FILE *file = NULL;
 
+// Function for printing error messages and terminating process if exit_failure
 void printError(char *error, bool exit_failure) {
     fprintf(stdout, "Local error: %s\n", error);
     fflush(stdout);
-    if (exit_failure) {
-        closeUDPSocket(&server_socket);
-        closeUDPSocket(&sockfd);
-        if (file) fclose(file);
-        exit(EXIT_FAILURE);
-    }
+    if (exit_failure) exit(EXIT_FAILURE);
 }
 
+// Function for printing usage and terminating process
 void printUsage(char **argv) {
     fprintf(stdout, "Usage: %s [-p port] root_dirpath\n", argv[0]);
     fflush(stdout);
     exit(EXIT_FAILURE);
 }
 
+// Function for printing RQ packets
 void printRqPacket(char *rq_opcode, char *src_ip, int src_port, char *filepath, char *mode, int blksize, int timeout) {
+    // Format OPTS output to be appended after RQ packet
     char opts[1024];
     bzero(opts, sizeof(opts));
     char blksize_val[1024];
@@ -49,7 +48,6 @@ void printRqPacket(char *rq_opcode, char *src_ip, int src_port, char *filepath, 
     if (atoi(timeout_val) != DEFAULT_TIMEOUT) {
         strcat(opts, "timeout=");
         strcat(opts, timeout_val);
-        strcat(opts, " ");
     }
 
     fprintf(stderr, "%s %s:%d \"%s\" %s %s", rq_opcode, src_ip, src_port, filepath, mode, opts);
@@ -57,7 +55,9 @@ void printRqPacket(char *rq_opcode, char *src_ip, int src_port, char *filepath, 
     fflush(stderr);
 }
 
+// Function for printing ACK and OACK packet (OACK is when block_id == -1)
 void printAckPacket(char *scr_ip, int src_port, int block_id, char *blksize_val, char *timeout_val) {
+    // Format OPTS output to be appended after OACK packet
     char opts[1024];
     bzero(opts, sizeof(opts));
 
@@ -81,22 +81,26 @@ void printAckPacket(char *scr_ip, int src_port, int block_id, char *blksize_val,
     } else {
         fprintf(stderr, "ACK %s:%d %d", scr_ip, src_port, block_id);
     }
+
     fprintf(stderr, "\n");
     fflush(stderr);
 }
 
+// Fucntion for printing DATA packet
 void printDataPacket(char *src_ip, int src_port, int dest_port, int block_id) {
     fprintf(stderr, "DATA %s:%d:%d %d", src_ip, src_port, dest_port, block_id);
     fprintf(stderr, "\n");
     fflush(stderr);
 }
 
+// Fucntion for printing ERROR packet
 void printErrorPacket(char *src_ip, int src_port, int dest_port, int code, char *message) {
     fprintf(stderr, "ERROR %s:%d:%d %d \"%s\"", src_ip, src_port, dest_port, code, message);
     fprintf(stderr, "\n");
     fflush(stderr);
 }
 
+// Debug function for printing packets
 void printPacket(char *packet, int size) {
     printf("Packet size: %d\n", size);
     for (int i = 0; i < size; i++) {
@@ -106,6 +110,7 @@ void printPacket(char *packet, int size) {
     printf("\n");
 }
 
+// Function for handling arguments
 void handleArguments(int argc, char **argv, int *server_port, char **root_dirpath) {
     char option;
     while ((option = getopt(argc, argv, "p:")) != -1) {
@@ -126,11 +131,13 @@ void handleArguments(int argc, char **argv, int *server_port, char **root_dirpat
     }
 }
 
+// Function for creating udp socket and saving the fd to sockfd
 void createUDPSocket(int *sockfd) {
     *sockfd = socket(AF_INET, SOCK_DGRAM, 0);
     if (*sockfd < 0) printError("Creating socket", true);
 }
 
+// Function for closing socket fd
 void closeUDPSocket(int *sockfd) {
     if (!sockfd) return;
     if (*sockfd == -1) return;
@@ -138,55 +145,13 @@ void closeUDPSocket(int *sockfd) {
     *sockfd = -1;
 }
 
+// Configure address to IPv4, set INADDR_ANY and set port
 void configureServerAddress(int server_port) {
     bzero(&server_addr, sizeof(server_addr));
 
     server_addr.sin_family = AF_INET;
     server_addr.sin_addr.s_addr = INADDR_ANY;
     server_addr.sin_port = htons(server_port);
-}
-
-/**
- * @brief Send error packet. Set opcode, error code and error message
- *
- * @param error_code error packet
- * @param error_msg error message
- */
-void sendErrorPacket(uint16_t error_code, char *error_msg) {
-    uint16_t opcode = ERROR_OPCODE;
-
-    opcode = htons(opcode);
-    error_code = htons(error_code);
-
-    int packet_buffer_len = OPCODE_SIZE + EEROR_CODE_SIZE + strlen(error_msg) + 1;
-    char packet_buffer[packet_buffer_len];
-    bzero(packet_buffer, sizeof(packet_buffer));
-    memcpy(&packet_buffer[0], &opcode, 2);
-    memcpy(&packet_buffer[2], &error_code, 2);
-
-    memcpy(&packet_buffer[4], error_msg, strlen(error_msg));
-
-    int bytes_tx = sendto(sockfd, packet_buffer, packet_buffer_len, 0, (struct sockaddr *) &recv_addr, sizeof(recv_addr));
-    if (bytes_tx < 0) printError("sendto not successful", true);
-
-    if (ntohs(error_code) != 5) printError(error_msg, true);
-}
-
-/**
- * @brief Handler for error packet. If error code isn't 5 terminate process
- *
- * @param packet error packet
- */
-void handleErrorPacket(char *packet) {
-    uint16_t errorCode;
-    memcpy(&errorCode, &packet[2], 2);
-
-    char *errMsg = &packet[4];
-
-    printErrorPacket(inet_ntoa(recv_addr.sin_addr), ntohs(recv_addr.sin_port), ntohs(src_addr.sin_port), ntohs(errorCode), errMsg);
-
-    if (errorCode == 5) printError(errMsg, false);
-    else printError(errMsg, true);
 }
 
 /**
@@ -197,21 +162,75 @@ void handleErrorPacket(char *packet) {
  * @param send_file server is sending file
  */
 void openFile(char *root_dirpath, char *filename, bool send_file) {
+    // Combine root dirpath and filename to get full path
     char filepath[1024] = "";
     strcat(filepath, root_dirpath);
     if (filepath[strlen(filepath)] != '/') strcat(filepath, "/");
     strcat(filepath, filename);
 
+    // Open file for read or write
     if (send_file) {
         file = fopen(filepath, "rb");
-        if (file == NULL) sendErrorPacket(1, "File not found");
+        if (file == NULL) sendErrorPacket(1, "File not found", true);
     } else {
-        file = fopen(filepath, "rb");
-        if (file != NULL) sendErrorPacket(1, "File already exists");
+        file = fopen(filepath, "rb"); // Check if file already exists
+        if (file != NULL) sendErrorPacket(6, "File already exists", true);
 
         file = fopen(filepath, "wb");
-        if (file == NULL) printError("creating file", true);
+        if (file == NULL) sendErrorPacket(0, "Couldn't create file", true);
     }
+}
+
+/**
+ * @brief Send error packet. Set opcode, error code and error message
+ *
+ * @param error_code error packet
+ * @param error_msg error message
+ */
+void sendErrorPacket(uint16_t error_code, char *error_msg, bool exit_failure) {
+    uint16_t opcode = ERROR_OPCODE;
+
+    opcode = htons(opcode);
+    error_code = htons(error_code);
+
+    // Set error packet
+    int packet_buffer_len = OPCODE_SIZE + EEROR_CODE_SIZE + strlen(error_msg) + 1;
+    char packet_buffer[packet_buffer_len];
+    bzero(packet_buffer, sizeof(packet_buffer));
+    memcpy(&packet_buffer[0], &opcode, 2);
+    memcpy(&packet_buffer[2], &error_code, 2);
+    memcpy(&packet_buffer[4], error_msg, strlen(error_msg));
+
+    // Send error packet
+    int bytes_tx = sendto(sockfd, packet_buffer, packet_buffer_len, 0, (struct sockaddr *) &recv_addr, sizeof(recv_addr));
+    if (bytes_tx < 0) printError("sendto not successful", true);
+
+    // Used while receiving RQ packet so the main process doesnt get terminated
+    if (!exit_failure) printError(error_msg, false);
+    // Print local error
+    if (ntohs(error_code) != 5) printError(error_msg, true);
+    else printError(error_msg, false);
+}
+
+/**
+ * @brief Handler for error packet. If error code isn't 5 terminate process
+ *
+ * @param packet error packet
+ */
+void handleErrorPacket(char *packet) {
+    uint16_t error_code;
+
+    // Get code and message
+    memcpy(&error_code, &packet[2], 2);
+    error_code = ntohs(error_code);
+    char *error_msg = &packet[4];
+
+    // Print ERROR packet
+    printErrorPacket(inet_ntoa(recv_addr.sin_addr), ntohs(recv_addr.sin_port), ntohs(src_addr.sin_port), error_code, error_msg);
+
+    // Print local error
+    if (error_code == 5) printError(error_msg, false);
+    else printError(error_msg, true);
 }
 
 /**
@@ -225,11 +244,13 @@ void openFile(char *root_dirpath, char *filename, bool send_file) {
 int sendOackPacket(int blksize, int timeout) {
     uint16_t opcode = OACK_OPCODE;
 
+    // Set necessary variables for blksize option
     char blksize_opt[] = "blksize";
     char blksize_val[1024];
     bzero(blksize_val, sizeof(blksize_val));
     sprintf(blksize_val, "%d", blksize);
 
+    // Set necewssary variables for timeout option
     char timeout_opt[] = "timeout";
     char timeout_val[1024];
     bzero(timeout_val, sizeof(timeout_val));
@@ -237,16 +258,19 @@ int sendOackPacket(int blksize, int timeout) {
 
     opcode = htons(opcode);
 
+    // Calculate length of packet based on options
     int packet_buffer_len = OPCODE_SIZE;
     if (blksize != DEFAULT_BLKSIZE) packet_buffer_len += strlen(blksize_opt) + 1 + strlen(blksize_val) + 1;
     if (blksize != DEFAULT_TIMEOUT) packet_buffer_len += strlen(timeout_opt) + 1 + strlen(timeout_val) + 1;
 
+    // Declare packet and set opcode 
     char packet_buffer[packet_buffer_len];
     bzero(packet_buffer, sizeof(packet_buffer));
-    int curr_byte = 0;
+    int curr_byte = 0; // For easier indexing of packet
     memcpy(&packet_buffer[curr_byte], &opcode, OPCODE_SIZE);
     curr_byte += OPCODE_SIZE;
 
+    // Add blksize option to OACK packet if not default
     if (blksize != DEFAULT_BLKSIZE) {
         memcpy(&packet_buffer[curr_byte], blksize_opt, strlen(blksize_opt));
         curr_byte += strlen(blksize_opt) + 1;
@@ -254,6 +278,7 @@ int sendOackPacket(int blksize, int timeout) {
         curr_byte += strlen(blksize_val) + 1;
     }
 
+    // Add timeout option to OACK packet if not default
     if (timeout != DEFAULT_TIMEOUT) {
         memcpy(&packet_buffer[curr_byte], timeout_opt, strlen(timeout_opt));
         curr_byte += strlen(timeout_opt) + 1;
@@ -261,8 +286,8 @@ int sendOackPacket(int blksize, int timeout) {
         curr_byte += strlen(timeout_val) + 1;
     }
 
+    // Send packet
     int bytes_tx = sendto(sockfd, packet_buffer, sizeof(packet_buffer), 0, (struct sockaddr *) &recv_addr, sizeof(recv_addr));
-
     if (bytes_tx < 0) printError("sendto not succesful", true);
 
     return bytes_tx;
@@ -280,14 +305,16 @@ void handleOptions(char *rq_packet, size_t bytes_rx, int *blksize, int *timeout)
     char blcksize_opt[] = "blksize";
     char timeout_opt[] = "timeout";
 
+    // Calculate how many bytes are filename and mode for indexing options
     int filename_len = strlen(&rq_packet[2]);
     int mode_len = strlen(&rq_packet[2 + filename_len + 1]);
 
-    int bytes_processed = 2 + filename_len + 1 + mode_len + 1;
+    int bytes_processed = 2 + filename_len + 1 + mode_len + 1; // For easier indexing of packet
 
     char *option;
     char *value;
 
+    // Loop through pairs of option and value and save them if recognized
     while (bytes_processed < bytes_rx) {
         option = &rq_packet[bytes_processed];
         bytes_processed += strlen(option) + 1;
@@ -317,14 +344,15 @@ int receiveRqPacket(char *mode, char *filename, bool *send_file, int *blksize, i
     char packet_buffer[DEFAULT_BLKSIZE];
     bzero(packet_buffer, sizeof(packet_buffer));
 
+    // Receive packet
     int bytes_rx = recvfrom(server_socket, packet_buffer, sizeof(packet_buffer), 0, (struct sockaddr *) &recv_addr, &recv_len);
     if (bytes_rx < 0) {
         printError("recvfrom not succesful", false);
-        return -1;
+        return -1; // Return -1 so the main server process doesn't fork
     }
     if (bytes_rx < 2) {
-        printError("too little bytes in receive data packet", false);
-        return -1;
+        sendErrorPacket(4, "Illegal TFTP operation.", false);
+        return -1; // Return -1 so the main server process doesn't fork
     }
 
     uint16_t opcode;
@@ -333,27 +361,31 @@ int receiveRqPacket(char *mode, char *filename, bool *send_file, int *blksize, i
 
     opcode = ntohs(opcode);
 
-    if (opcode == ERROR_OPCODE) return -1;
-    else if (opcode == RRQ_OPCODE) *send_file = true;
+    // Decide whether it is download or upload
+    if (opcode == RRQ_OPCODE) *send_file = true;
     else if (opcode == WRQ_OPCODE) *send_file = false;
     else {
-        printError("unexpected opcode while receive rq packet", false);
-        return -1;
+        sendErrorPacket(4, "Illegal TFTP operation.", false);
+        return -1; // Return -1 so the main server process doesn't fork
     }
 
+    // Get filename and mode
     strcpy(filename, &packet_buffer[2]);
     strcpy(mode, &packet_buffer[2 + strlen(filename) + 1]);
 
+    // If there are more bytes after mode handle options
     if (OPCODE_SIZE + strlen(filename) + 1 + strlen(mode) + 1 < bytes_rx) {
         handleOptions(packet_buffer, bytes_rx, blksize, timeout);
     }
 
+    // Print RQ packet
     if (opcode == RRQ_OPCODE) {
         printRqPacket("RRQ", inet_ntoa(recv_addr.sin_addr), ntohs(recv_addr.sin_port), filename, mode, *blksize, *timeout);
     } else if (opcode == WRQ_OPCODE) {
         printRqPacket("WRQ", inet_ntoa(recv_addr.sin_addr), ntohs(recv_addr.sin_port), filename, mode, *blksize, *timeout);
     }
 
+    // Cancel inavalid option values
     if (*blksize < MIN_BLKSIZE || *blksize > MAX_BLKSIZE) {
         *blksize = DEFAULT_BLKSIZE;
     }
@@ -377,17 +409,21 @@ int sendDataPacket(uint16_t block, int blksize, bool is_retransmit, char *mode) 
     static int bytes_read;
     uint16_t opcode = DATA_OPCODE;
     
+    // Create DATA packet
     char packet_buffer[blksize + OPCODE_SIZE + BLOCK_NUMBER_SIZE];
     bzero(packet_buffer, sizeof(packet_buffer));
 
     block = htons(block);
     opcode = htons(opcode);
 
+    // Set opcode and block number
     memcpy(&packet_buffer[0], &opcode, 2);
     memcpy(&packet_buffer[2], &block, 2);
 
+    // If the data packet is being retransmited seek cursor backward, so the right data are sent
     if (is_retransmit) fseek(file, -bytes_read, SEEK_END);
 
+    // Replace \n with \r\n if the mode is netascii
     if (strcmp(mode, "netascii") == 0) {
         char ch[2];
         bzero(ch, sizeof(ch));
@@ -407,6 +443,7 @@ int sendDataPacket(uint16_t block, int blksize, bool is_retransmit, char *mode) 
         bytes_read = fread(&packet_buffer[4], sizeof(char), blksize, file);
     }
 
+    // Send packet
     int bytes_tx = sendto(sockfd, packet_buffer, bytes_read + OPCODE_SIZE + BLOCK_NUMBER_SIZE, 0, (struct sockaddr *) &recv_addr, sizeof(recv_addr));
     if (bytes_tx < 0) printError("sendto not successful", true);
 
@@ -422,30 +459,35 @@ int sendDataPacket(uint16_t block, int blksize, bool is_retransmit, char *mode) 
  * @return bytes received
  */
 int receiveDataPacket(uint16_t expected_block, int blksize, char *mode) {
+    // Create packet
     char packet_buffer[blksize + OPCODE_SIZE + BLOCK_NUMBER_SIZE];
     bzero(packet_buffer, sizeof(packet_buffer));
 
+    // Receive packet
     int bytes_rx = recvfrom(sockfd, packet_buffer, sizeof(packet_buffer), 0, (struct sockaddr *) &recv_addr, &recv_len);
     if (bytes_rx < 0) printError("recvfrom not succesful", true);
-    if (bytes_rx < 4) printError("too little bytes in receive data packet", true);
+    if (bytes_rx < 4) sendErrorPacket(4, "Illegal TFTP operation.", true);
 
     uint16_t opcode;
     uint16_t block;
 
+    // Get opcode and block number
     memcpy(&opcode, &packet_buffer[0], 2);
     memcpy(&block, &packet_buffer[2], 2);
 
     opcode = ntohs(opcode);
     block = ntohs(block);
 
+    // Check opcode and block
     if (opcode == ERROR_OPCODE) handleErrorPacket(packet_buffer);
-    else if (opcode != DATA_OPCODE) printError("unexpected opcode while receive data", true);
+    else if (opcode != DATA_OPCODE) sendErrorPacket(4, "Illegal TFTP operation.", true);
 
-    if (block != expected_block) printError("unexpected block while receive data", true);
+    if (block != expected_block) sendErrorPacket(4, "Illegal TFTP operation.", true);
 
     char data[blksize + 1];
     bzero(data, sizeof(data));
 
+    // Read data from packet. If netassci ignore \r
     if (strcmp(mode, "netascii") == 0) {
         char ch;
         int bytes_written = 0;
@@ -459,11 +501,14 @@ int receiveDataPacket(uint16_t expected_block, int blksize, char *mode) {
                 bytes_written++;
             }
         }
+    } else {
+        memcpy(data, &packet_buffer[4], bytes_rx - OPCODE_SIZE - BLOCK_NUMBER_SIZE);
     }
-    if (fprintf(file, "%s", data) < 0) sendErrorPacket(3, "Disk full or allocation exceeded");
+    // Write data to file
+    if (fprintf(file, "%s", data) < 0) sendErrorPacket(3, "Disk full or allocation exceeded", true);
 
+    // Print DATA packet
     printDataPacket(inet_ntoa(recv_addr.sin_addr), ntohs(recv_addr.sin_port), ntohs(src_addr.sin_port), block);
-
 
     return bytes_rx;
 }
@@ -477,16 +522,20 @@ int receiveDataPacket(uint16_t expected_block, int blksize, char *mode) {
  */
 int sendAckPacket(uint16_t block) {
     uint16_t opcode = ACK_OPCODE;
-    char ack_buffer[ACK_PACKET_SIZE];
+
+    // Create ACK packet
+    char packet_buffer[ACK_PACKET_SIZE];
+    bzero(packet_buffer, 4);
 
     block = htons(block);
     opcode = htons(opcode);
 
-    bzero(ack_buffer, 4);
-    memcpy(&ack_buffer[0], &opcode, 2);
-    memcpy(&ack_buffer[2], &block, 2);
+    // Set ACK packet
+    memcpy(&packet_buffer[0], &opcode, 2);
+    memcpy(&packet_buffer[2], &block, 2);
 
-    int bytes_tx = sendto(sockfd, ack_buffer, ACK_PACKET_SIZE, 0, (struct sockaddr *) &recv_addr, sizeof(recv_addr));
+    // Send packet
+    int bytes_tx = sendto(sockfd, packet_buffer, ACK_PACKET_SIZE, 0, (struct sockaddr *) &recv_addr, sizeof(recv_addr));
     if (bytes_tx < 0) printError("sendto not succesful", true);
 
     return bytes_tx;
@@ -500,23 +549,30 @@ int sendAckPacket(uint16_t block) {
  * @return bytes received
  */
 int receiveAckPacket(uint16_t expected_block) {
-    uint16_t block;
-    uint16_t opcode;
-    char ack_buffer[ACK_PACKET_SIZE];
+    char packet_buffer[DEFAULT_BLKSIZE];
+    bzero(packet_buffer, sizeof(packet_buffer));
 
-    int bytes_rx = recvfrom(sockfd, ack_buffer, sizeof(ack_buffer), 0, (struct sockaddr *) &recv_addr, &recv_len);
+    // Receive ACK buffer
+    int bytes_rx = recvfrom(sockfd, packet_buffer, sizeof(packet_buffer), 0, (struct sockaddr *) &recv_addr, &recv_len);
     if (bytes_rx < 0) printError("recvfrom not succesful", true);
+    if (bytes_rx < 4) sendErrorPacket(4, "Illegal TFTP operation.", true);
 
-    memcpy(&block, &ack_buffer[2], 2);
-    memcpy(&opcode, &ack_buffer[0], 2);
+    uint16_t opcode;
+    uint16_t block;
+
+    // Get block and opcode
+    memcpy(&opcode, &packet_buffer[0], 2);
+    memcpy(&block, &packet_buffer[2], 2);
 
     opcode = ntohs(opcode);
     block = ntohs(block);
 
-    if (opcode == ERROR_OPCODE) handleErrorPacket(ack_buffer);
-    else if (opcode != ACK_OPCODE) printError("unexpected opcode while receive ack", true);
-    if (block != expected_block) printError("unexpected block while receive ack", true);
+    // Check opcode and block
+    if (opcode == ERROR_OPCODE) handleErrorPacket(packet_buffer);
+    else if (opcode != ACK_OPCODE) sendErrorPacket(4, "Illegal TFTP operation, unexpected opcode", true);
+    if (block != expected_block) sendErrorPacket(4, "Illegal TFTP operation, unexpected opcode", true);
 
+    // Print packet
     printAckPacket(inet_ntoa(recv_addr.sin_addr), ntohs(recv_addr.sin_port), block, NULL, NULL);
 
 
