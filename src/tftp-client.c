@@ -83,19 +83,19 @@ void printAckPacket(char *scr_ip, int src_port, int block_id, int blksize, int t
 }
 
 void printDataPacket(char *src_ip, int src_port, int dest_port, int block_id) {
-    fprintf(stderr, "DATA %s:%d %d %d", src_ip, src_port, dest_port, block_id);
+    fprintf(stderr, "DATA %s:%d:%d %d", src_ip, src_port, dest_port, block_id);
     fprintf(stderr, "\n");
     fflush(stderr);
 }
 
 void printErrorPacket(char *src_ip, int src_port, int dest_port, int code, char *message) {
-    fprintf(stderr, "ERROR %s:%d %d %d \"%s\"", src_ip, src_port, dest_port, code, message);
+    fprintf(stderr, "ERROR %s:%d:+%d %d \"%s\"", src_ip, src_port, dest_port, code, message);
     fprintf(stderr, "\n");
     fflush(stderr);
 }
 
 void printPacket(char *packet, int size) {
-    printf("Packet size: %d\n", size);
+    fprintf(stdout, "Packet size: %d\n", size);
     for (int i = 0; i < size; i++) {
         if (packet[i] <= 9) printf("%d ", packet[i]);
         else (printf("%c ", packet[i]));
@@ -174,15 +174,20 @@ int receiveOackPacket(int *blksize, int *timeout) {
     if (bytes_rx < 0) perror("recvfrom not succesful");
     if (bytes_rx < 2) printError("too little bytes in receive data packet", true);
 
+    uint16_t opcode;
+
+    memcpy(&opcode, &packet_buffer[0], 2);
+
+    opcode = ntohs(opcode);
+
+    if (opcode == ERROR_OPCODE) handleErrorPacket(packet_buffer);
+    else if (opcode != OACK_OPCODE) sendErrorPacket(4, "Illegal TFTP operation, unexpected opcode");
+
     char blksize_opt[] = "blksize";
     int blksize_val = DEFAULT_BLKSIZE;
-    int min_blcksize = 8;
-    int max_blcksize = 65464;
 
     char timeout_opt[] = "timeout";
     int timeout_val = DEFAULT_TIMEOUT;
-    int min_timeout = 1;
-    int max_timeout = 255;
 
     int bytes_processed = OPCODE_SIZE;
 
@@ -197,19 +202,18 @@ int receiveOackPacket(int *blksize, int *timeout) {
 
         if (!strcmp(option, blksize_opt)) {
             blksize_val = atoi(value);
-            if (*blksize < min_blcksize || *blksize > max_blcksize) {
+            *blksize = blksize_val;
+            if (*blksize < MIN_BLKSIZE || *blksize > MAX_BLKSIZE) {
                 printError("invalid value for blksize option", true);
             }
         } else if (!strcmp(option, timeout_opt)) {
             timeout_val = atoi(value);
-            if (*timeout < min_timeout || *timeout > max_timeout) {
+            *timeout = timeout_val;
+            if (*timeout < MIN_TIMEOUT || *timeout > MAX_TIMEOUT) {
                 printError("invalid value for timeout option", true);
             }
         }
     }
-
-    *blksize = blksize_val;
-    *timeout = timeout_val;
 
     printAckPacket(inet_ntoa(recv_addr.sin_addr), ntohs(recv_addr.sin_port), -1, *blksize, *timeout);
 

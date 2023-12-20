@@ -86,13 +86,13 @@ void printAckPacket(char *scr_ip, int src_port, int block_id, char *blksize_val,
 }
 
 void printDataPacket(char *src_ip, int src_port, int dest_port, int block_id) {
-    fprintf(stderr, "DATA %s:%d %d %d", src_ip, src_port, dest_port, block_id);
+    fprintf(stderr, "DATA %s:%d:%d %d", src_ip, src_port, dest_port, block_id);
     fprintf(stderr, "\n");
     fflush(stderr);
 }
 
 void printErrorPacket(char *src_ip, int src_port, int dest_port, int code, char *message) {
-    fprintf(stderr, "ERROR %s:%d %d %d \"%s\"", src_ip, src_port, dest_port, code, message);
+    fprintf(stderr, "ERROR %s:%d:%d %d \"%s\"", src_ip, src_port, dest_port, code, message);
     fprintf(stderr, "\n");
     fflush(stderr);
 }
@@ -170,6 +170,8 @@ void sendErrorPacket(uint16_t error_code, char *error_msg) {
     if (bytes_tx < 0) printError("sendto not successful", true);
 
     printErrorPacket(inet_ntoa(src_addr.sin_addr), ntohs(src_addr.sin_port), ntohs(server_addr.sin_port), ntohs(error_code), error_msg);
+
+    if (ntohs(error_code) != 5) printError(error_msg, true);
 }
 
 /**
@@ -206,6 +208,9 @@ void openFile(char *root_dirpath, char *filename, bool send_file) {
         file = fopen(filepath, "rb");
         if (file == NULL) sendErrorPacket(1, "File not found");
     } else {
+        file = fopen(filepath, "rb");
+        if (file != NULL) sendErrorPacket(1, "File already exists");
+        fclose(file);
         file = fopen(filepath, "wb");
         if (file == NULL) printError("creating file", true);
     }
@@ -469,7 +474,7 @@ int receiveAckPacket(uint16_t expected_block) {
     uint16_t opcode;
     char ack_buffer[ACK_PACKET_SIZE];
 
-    int bytes_rx = recvfrom(sockfd, ack_buffer, ACK_PACKET_SIZE, 0, (struct sockaddr *) &recv_addr, &recv_len);
+    int bytes_rx = recvfrom(sockfd, ack_buffer, sizeof(ack_buffer), 0, (struct sockaddr *) &recv_addr, &recv_len);
     if (bytes_rx < 0) printError("recvfrom not succesful", true);
 
     memcpy(&block, &ack_buffer[2], 2);
@@ -483,6 +488,7 @@ int receiveAckPacket(uint16_t expected_block) {
     if (block != expected_block) printError("unexpected block while receive ack", true);
 
     printAckPacket(inet_ntoa(recv_addr.sin_addr), ntohs(recv_addr.sin_port), block, NULL, NULL);
+
 
     return bytes_rx;
 }

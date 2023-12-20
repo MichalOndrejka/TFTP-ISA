@@ -35,6 +35,11 @@
 #define EEROR_CODE_SIZE 2
 #define ACK_PACKET_SIZE 4
 
+#define MIN_BLKSIZE 8
+#define MAX_BLKSIZE 65464
+#define MIN_TIMEOUT 1
+#define MAX_TIMEOUT 255
+
 void printError(char *error, bool exit_failure);
 void printUsage(char **argv);
 void printRqPacket(char *rq_opcode, char *src_ip, int src_port, char *filepath, char *mode, char *blksize_val, char *timeout_val);
