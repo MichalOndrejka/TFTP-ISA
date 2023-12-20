@@ -89,7 +89,7 @@ void printDataPacket(char *src_ip, int src_port, int dest_port, int block_id) {
 }
 
 void printErrorPacket(char *src_ip, int src_port, int dest_port, int code, char *message) {
-    fprintf(stderr, "ERROR %s:%d:+%d %d \"%s\"", src_ip, src_port, dest_port, code, message);
+    fprintf(stderr, "ERROR %s:%u:%d %d \"%s\"", src_ip, src_port, dest_port, code, message);
     fprintf(stderr, "\n");
     fflush(stderr);
 }
@@ -427,10 +427,10 @@ int sendAckPacket(uint16_t block) {
  * @return bytes received
  */
 int receiveAckPacket(uint16_t expected_block) {
-    char packet_buffer[ACK_PACKET_SIZE];
+    char packet_buffer[DEFAULT_BLKSIZE];
     bzero(packet_buffer, sizeof(packet_buffer));
 
-    int bytes_rx = recvfrom(sockfd, packet_buffer, ACK_PACKET_SIZE, 0, (struct sockaddr *) &recv_addr, &recv_len);
+    int bytes_rx = recvfrom(sockfd, packet_buffer, sizeof(packet_buffer), 0, (struct sockaddr *) &recv_addr, &recv_len);
     if (bytes_rx < 0) printError("recvfrom not succesful", true);
     if (bytes_rx < 4) printError("too little bytes in ack packet recvfrom", true);
 

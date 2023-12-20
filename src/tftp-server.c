@@ -169,8 +169,6 @@ void sendErrorPacket(uint16_t error_code, char *error_msg) {
     int bytes_tx = sendto(sockfd, packet_buffer, packet_buffer_len, 0, (struct sockaddr *) &recv_addr, sizeof(recv_addr));
     if (bytes_tx < 0) printError("sendto not successful", true);
 
-    printErrorPacket(inet_ntoa(src_addr.sin_addr), ntohs(src_addr.sin_port), ntohs(server_addr.sin_port), ntohs(error_code), error_msg);
-
     if (ntohs(error_code) != 5) printError(error_msg, true);
 }
 
@@ -210,7 +208,7 @@ void openFile(char *root_dirpath, char *filename, bool send_file) {
     } else {
         file = fopen(filepath, "rb");
         if (file != NULL) sendErrorPacket(1, "File already exists");
-        fclose(file);
+
         file = fopen(filepath, "wb");
         if (file == NULL) printError("creating file", true);
     }
@@ -375,22 +373,41 @@ int receiveRqPacket(char *mode, char *filename, bool *send_file, int *blksize, i
  * 
  * @return bytes sent
  */
-int sendDataPacket(uint16_t block, int blksize, bool is_retransmit) {
+int sendDataPacket(uint16_t block, int blksize, bool is_retransmit, char *mode) {
+    static int bytes_read;
     uint16_t opcode = DATA_OPCODE;
     
-    char data_buffer[blksize + OPCODE_SIZE + BLOCK_NUMBER_SIZE];
-    bzero(data_buffer, sizeof(data_buffer));
+    char packet_buffer[blksize + OPCODE_SIZE + BLOCK_NUMBER_SIZE];
+    bzero(packet_buffer, sizeof(packet_buffer));
 
     block = htons(block);
     opcode = htons(opcode);
 
-    memcpy(&data_buffer[0], &opcode, 2);
-    memcpy(&data_buffer[2], &block, 2);
+    memcpy(&packet_buffer[0], &opcode, 2);
+    memcpy(&packet_buffer[2], &block, 2);
 
-    if (is_retransmit) fseek(file, -blksize, SEEK_END);
-    int bytes_read = fread(&data_buffer[4], sizeof(char), blksize, file);
+    if (is_retransmit) fseek(file, -bytes_read, SEEK_END);
 
-    int bytes_tx = sendto(sockfd, data_buffer, bytes_read + OPCODE_SIZE + BLOCK_NUMBER_SIZE, 0, (struct sockaddr *) &recv_addr, sizeof(recv_addr));
+    if (strcmp(mode, "netascii") == 0) {
+        char ch[2];
+        bzero(ch, sizeof(ch));
+        for (int i = 0; i < blksize; i++) {
+            if (fread(ch, sizeof(char), 1, file) == 0) {
+                break;
+            }
+            bytes_read = i + 1;
+            if (!strcmp(ch, "\n")) {
+                strcat(&packet_buffer[4], "\r\n");
+                i++;
+            } else {
+                strcat(&packet_buffer[4], ch);
+            }
+        }
+    } else {
+        bytes_read = fread(&packet_buffer[4], sizeof(char), blksize, file);
+    }
+
+    int bytes_tx = sendto(sockfd, packet_buffer, bytes_read + OPCODE_SIZE + BLOCK_NUMBER_SIZE, 0, (struct sockaddr *) &recv_addr, sizeof(recv_addr));
     if (bytes_tx < 0) printError("sendto not successful", true);
 
     return bytes_tx;
@@ -404,7 +421,7 @@ int sendDataPacket(uint16_t block, int blksize, bool is_retransmit) {
  * 
  * @return bytes received
  */
-int receiveDataPacket(uint16_t expected_block, int blksize) {
+int receiveDataPacket(uint16_t expected_block, int blksize, char *mode) {
     char packet_buffer[blksize + OPCODE_SIZE + BLOCK_NUMBER_SIZE];
     bzero(packet_buffer, sizeof(packet_buffer));
 
@@ -428,8 +445,21 @@ int receiveDataPacket(uint16_t expected_block, int blksize) {
 
     char data[blksize + 1];
     bzero(data, sizeof(data));
-    memcpy(data, &packet_buffer[4], bytes_rx - 4);
 
+    if (strcmp(mode, "netascii") == 0) {
+        char ch;
+        int bytes_written = 0;
+        for (int i = 0; i < bytes_rx - OPCODE_SIZE - BLOCK_NUMBER_SIZE; i++) {
+            ch = packet_buffer[4 + i];
+            if (ch == '\r') {
+                continue;
+            }
+            else {
+                data[bytes_written] = ch;
+                bytes_written++;
+            }
+        }
+    }
     if (fprintf(file, "%s", data) < 0) sendErrorPacket(3, "Disk full or allocation exceeded");
 
     printDataPacket(inet_ntoa(recv_addr.sin_addr), ntohs(recv_addr.sin_port), ntohs(src_addr.sin_port), block);
@@ -558,6 +588,7 @@ int main(int argc, char **argv) {
             closeUDPSocket(&sockfd);
             continue;
         } else {
+
             closeUDPSocket(&server_socket);
 
             createUDPSocket(&sockfd);
@@ -604,14 +635,14 @@ int main(int argc, char **argv) {
                 block++;
 
                 do {
-                    bytes_tx = sendDataPacket(block, blksize, false);
+                    bytes_tx = sendDataPacket(block, blksize, false, mode);
 
                     // Handle retransmisson of DATA packet
                     for (int i = 0; i <= maxRetransmitCount; i++)
                     {
                         if (i == maxRetransmitCount) printError("max retansmission count reached", true);
                         if (handleTimeout(timeout)) {
-                            bytes_tx = sendDataPacket(block, blksize, true);
+                            bytes_tx = sendDataPacket(block, blksize, true, mode);
                         } else break;
                     }
                     // Receive appropriate ACK
@@ -646,7 +677,7 @@ int main(int argc, char **argv) {
 
                     block++;
 
-                    bytes_rx = receiveDataPacket(block, blksize);
+                    bytes_rx = receiveDataPacket(block, blksize, mode);
 
                     sendAckPacket(block);
                 // While not received less data then max in data packet
